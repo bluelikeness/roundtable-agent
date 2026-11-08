@@ -1,6 +1,20 @@
-# 멀티봇 허브 (VM 1). 러너·Mock 어댑터는 P1-2·P1-3 에서 추가한다.
+# 멀티봇 허브 (VM 1). 러너는 P1-3 에서 추가한다.
 # 로컬 개발용 포트 노출은 docker-compose.override.yml 에 있다.
 name: multibot
+
+# Mock 어댑터 공통 정의 (docs/03-adapters.md 10장). 이름만 바꿔 여러 개 띄운다.
+x-mock-adapter: &mock-adapter
+  build:
+    context: ./adapters
+    dockerfile: mock/Dockerfile
+  secrets:
+    - hub_adapter_token
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+  restart: unless-stopped
 
 services:
   postgres:
@@ -42,5 +56,38 @@ services:
       - hub-api
     restart: unless-stopped
 
+  # 허브·러너를 실제 봇 없이 검증하는 가짜 봇 3개. MCP 9000, 관리 HTTP 9100 (내부망)
+  mock-a:
+    <<: *mock-adapter
+    environment:
+      ADAPTER_NAME: mock-a
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+    volumes:
+      - mock-a-data:/data
+
+  mock-b:
+    <<: *mock-adapter
+    environment:
+      ADAPTER_NAME: mock-b
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+    volumes:
+      - mock-b-data:/data
+
+  mock-c:
+    <<: *mock-adapter
+    environment:
+      ADAPTER_NAME: mock-c
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+    volumes:
+      - mock-c-data:/data
+
+# 허브↔어댑터 공유 토큰(X-Hub-Token). 값은 .env 의 HUB_ADAPTER_TOKEN
+secrets:
+  hub_adapter_token:
+    environment: HUB_ADAPTER_TOKEN
+
 volumes:
   pgdata:
+  mock-a-data:
+  mock-b-data:
+  mock-c-data:
