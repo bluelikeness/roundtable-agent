@@ -54,5 +54,6 @@ def build() -> dict:
 if __name__ == "__main__":
     out = Path(sys.argv[1])
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(build(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # Windows 에서도 LF 로 쓴다(.gitattributes 의 eol=lf 와 맞춤)
+    out.write_text(json.dumps(build(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {out}")
