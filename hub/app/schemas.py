@@ -51,3 +51,11 @@ class MessageOut(BaseModel):
     structured: dict[str, Any] | None
     seq: int
     created_at: datetime
+
+
+class BotOut(BaseModel):
+    """GET /api/bots: @자동완성·봇 색에 쓰는 공개 필드만(mcp_url·admin_url 은 내보내지 않는다)."""
+
+    name: str
+    aliases: list[str]
+    color: str | None

@@ -1,5 +1,4 @@
 import { parseCommand } from "../../lib/commands";
-import { knownBots } from "../../lib/bots";
 import {
   cancelQueued,
   modelOf,
@@ -32,8 +31,8 @@ async function submit(text: string, sid: string | null): Promise<boolean> {
       return true;
     case "reset":
     case "restart":
-      // 허브에 해당 API 가 아직 없다(P1-5 보고 참고). 텍스트를 Claude 에 보내지 않는다
-      notify(`${cmd.cmd === "reset" ? "/reset" : "/restart"} 은 아직 허브 API 가 없어 쓸 수 없습니다`, "warn");
+      // 허브 API 미구현(후속 단계). 텍스트를 Claude 에 보내지 않는다
+      notify(`${cmd.cmd === "reset" ? "/reset" : "/restart"}: 허브 API 미구현`, "warn");
       return false;
     case "invalid":
       notify(cmd.message, "warn");
@@ -46,12 +45,9 @@ export function ChatView() {
   const chat = useStore((s) => (s.activeId ? s.chats[s.activeId] : undefined)) ?? null;
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeId));
   const ws = useStore((s) => s.ws);
-  const hubBots = useStore((s) => s.bots);
-  const chats = useStore((s) => s.chats);
-  const botStatus = useStore((s) => s.botStatus);
+  const bots = useStore((s) => s.bots);
   const notice = useStore((s) => s.notice);
   useStore((s) => s.models); // 모델 배지 갱신
-  const bots = knownBots(hubBots, chats, Object.keys(botStatus));
   const queued = chat?.runs.queued ?? [];
   const title = activeId ? (session?.title ?? "새 세션") : "새 세션";
 

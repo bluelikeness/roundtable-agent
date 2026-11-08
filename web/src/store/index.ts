@@ -24,8 +24,8 @@ export interface AppState {
   /** null = 아직 DB 에 없는 새 세션(첫 메시지 전) */
   activeId: string | null;
   chats: Record<string, ChatState>;
-  /** 허브 봇 목록. null = 허브에 목록 API 가 없음 → 대화에 나온 봇 이름으로 대신한다 */
-  bots: BotInfo[] | null;
+  /** 허브 봇 목록(GET /api/bots, bots.yaml 순서) */
+  bots: BotInfo[];
   botStatus: Record<string, BotStatusPayload>;
   ws: WsStatus;
   notice: Notice | null;
@@ -58,7 +58,7 @@ export const useStore = create<AppState>(() => ({
   sessions: [],
   activeId: null,
   chats: {},
-  bots: null,
+  bots: [],
   botStatus: {},
   ws: "closed",
   notice: null,
@@ -218,9 +218,7 @@ export async function loadBots() {
   try {
     set({ bots: await api.listBots() });
   } catch (e) {
-    // 허브에 봇 목록 API 가 아직 없다(404). 대화에 나온 봇 이름으로 대신한다
-    if (!(e instanceof HttpError && e.status === 404)) notify(errorText(e), "warn");
-    set({ bots: null });
+    notify(errorText(e), "warn");
   }
 }
 
