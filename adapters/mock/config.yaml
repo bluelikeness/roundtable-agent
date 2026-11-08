@@ -1,0 +1,10 @@
+name: mock-a
+description: 테스트용 가짜 봇. 식당 추천과 날씨에 답한다.
+mock:
+  latency_s: {min: 2, max: 8}
+  fail_rate: 0.1            # ok=false, error=timeout
+  needs_input_rate: 0.2     # 되물음 + choices
+  unavailable_after: null   # N번째 호출부터 login_required (장애 시나리오)
+  replies:                  # 키워드 → 템플릿. 없으면 echo
+    식당: "강남 OO식당 18:30 2명 가능합니다. [버튼: 예약] [버튼: 다른 곳]"
+    날씨: "내일 서울 맑음, 최고 14도"

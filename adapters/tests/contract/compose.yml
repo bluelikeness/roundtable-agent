@@ -1,0 +1,21 @@
+# 계약 테스트 전용 오버레이. 허브 웹훅을 기록용 수신기(webhook-sink)로 돌린다.
+# make test-adapters 가 docker-compose.yml·override 위에 얹어 쓴다. 경로는 레포 루트 기준.
+services:
+  webhook-sink:
+    build:
+      context: ./adapters
+      dockerfile: mock/Dockerfile
+    command: ["python", "-m", "adapters.testing.webhook_sink"]
+    secrets:
+      - hub_adapter_token
+    ports:
+      - "127.0.0.1:9199:8000"
+  mock-a:
+    environment:
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+  mock-b:
+    environment:
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+  mock-c:
+    environment:
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
