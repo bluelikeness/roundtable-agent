@@ -6,6 +6,9 @@ COMPOSE := docker compose
 # 계약 테스트용: 허브 웹훅을 기록용 수신기로 돌리는 오버레이를 얹는다
 COMPOSE_CONTRACT := $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml -f adapters/tests/contract/compose.yml
 JSON2TS := pnpm dlx json-schema-to-typescript@15.0.4
+# 평가 전용 스택(운영 스택과 다른 compose 프로젝트). runner/eval/compose.yml 참고
+COMPOSE_EVAL := $(COMPOSE) -p multibot-eval -f runner/eval/compose.yml
+EVAL_TOKEN := runner/eval/out/token
 
 .PHONY: up down logs ps test test-hub test-runner test-adapters eval types admin runner-login
 
@@ -38,8 +41,10 @@ test-adapters:  ## 어댑터 단위 테스트 + Mock 3개 계약 테스트(docs/
 	cd adapters && uv run pytest -q tests/contract -n 3 --dist loadgroup
 	@echo "adapter tests done"
 
-eval:  ## T1~T14 평가 (P1-4 이후)
-	@echo "eval 은 P1-4 에서 구현합니다" && exit 1
+eval:  ## T1~T14 평가: 실제 claude -p 를 Mock 으로 각 5회. 러너 로그인 필요(make runner-login). 예: make eval ARGS="--cases T3,T10 --n 1"
+	@test -s $(EVAL_TOKEN) || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > $(EVAL_TOKEN)
+	$(COMPOSE_EVAL) up -d --build --wait
+	$(COMPOSE_EVAL) run --rm eval python -m eval $(ARGS); rc=$$?; $(COMPOSE_EVAL) down; exit $$rc
 
 types:  ## hub/app/events.py -> web/src/types/events.ts
 	uv run -q --project hub python scripts/gen_types.py web/src/types/events.schema.json

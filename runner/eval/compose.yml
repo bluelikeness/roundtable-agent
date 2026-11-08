@@ -1,0 +1,101 @@
+# 평가(make eval) 전용 스택. 운영 스택(compose 프로젝트 multibot)과 섞이지 않게 별도 프로젝트로 띄운다.
+#   docker compose -p multibot-eval -f runner/eval/compose.yml ...
+# - 포트를 열지 않는다. 드라이버(eval)가 같은 내부망에서 러너를 부른다
+# - 토큰은 평가 때마다 만드는 임시 값(runner/eval/out/token, 커밋 안 함). 실제 봇 자격증명 아님
+# - Claude Code 로그인은 운영 러너 볼륨(multibot_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
+#   tmpfs 라 평가 대화가 운영 볼륨에 남지 않는다
+# - orchestrator.md 는 작업 트리 파일을 마운트한다: 프롬프트를 고치고 다시 돌릴 때 재빌드가 필요 없다
+
+x-mock: &mock
+  build:
+    context: ../../adapters
+    dockerfile: mock/Dockerfile
+  secrets: [hub_adapter_token]
+  tmpfs: [/data]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
+x-runner: &runner
+  build:
+    context: ../..
+    dockerfile: runner/Dockerfile
+  secrets: [hub_adapter_token]
+  volumes:
+    - runner-claude:/home/runner/.claude
+    - ../orchestrator.md:/srv/runner/orchestrator.md:ro
+  tmpfs:
+    - /home/runner/.claude/projects:uid=1000,gid=1000
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8700/healthz')"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
+services:
+  runner:
+    <<: *runner
+  # T13: 토론 상한 5 설정
+  runner-r5:
+    <<: *runner
+    environment:
+      RUNNER_DEBATE_MAX_ROUNDS: "5"
+
+  # 기본 Mock 3개 (무작위 실패·되물음 없음)
+  mock-a:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/mock-a.yaml}
+    volumes: [./mocks:/cfg:ro]
+  mock-b:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-b, ADAPTER_CONFIG: /cfg/mock-b.yaml}
+    volumes: [./mocks:/cfg:ro]
+  mock-c:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-c, ADAPTER_CONFIG: /cfg/mock-c.yaml}
+    volumes: [./mocks:/cfg:ro]
+  # 시나리오 변형. 툴 이름이 mcp__mock-a__* 가 되도록 봇 이름은 원래 이름을 쓴다
+  a-people:   # T6 인원 되물음 1회
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-people.yaml}
+    volumes: [./mocks:/cfg:ro]
+  a-budget:   # T7 예산 되물음(매번)
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-budget.yaml}
+    volumes: [./mocks:/cfg:ro]
+  a-confirm:  # T8·T9·T14 확정 요청
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-confirm.yaml}
+    volumes: [./mocks:/cfg:ro]
+  a-fail:     # T11 항상 실패
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-fail.yaml}
+    volumes: [./mocks:/cfg:ro]
+  b-down:     # T10 기동 직후부터 login_required
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-b, ADAPTER_CONFIG: /cfg/b-down.yaml}
+    volumes: [./mocks:/cfg:ro]
+
+  # 평가 드라이버. 러너 이미지(파이썬·pydantic)를 그대로 쓰고 eval 코드만 마운트한다
+  eval:
+    <<: *runner
+    profiles: [driver]
+    volumes:
+      - ./:/srv/runner/eval:ro
+      - ./out:/srv/eval-out
+    tmpfs: []
+    healthcheck: {disable: true}
+    environment:
+      EVAL_OUT: /srv/eval-out
+    command: ["python", "-m", "eval"]
+
+secrets:
+  hub_adapter_token:
+    file: ./out/token
+
+volumes:
+  runner-claude:
+    external: true
+    name: multibot_runner-claude

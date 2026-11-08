@@ -11,6 +11,10 @@ text 에 지시어를 넣는다(봇이 자기 메시지를 읽고 행동을 바�
   [mock:fast]     지연을 0.2초로 줄인다
 
 로그인 상태는 state_dir/session.json 파일이 있느냐로 흉내 낸다. 지우면 login_required.
+
+평가(runner/eval)는 지시어를 Claude 가 넣게 할 수 없으므로 설정으로 고정 시나리오를 만든다.
+  ask_back   스레드마다 처음 times 번(없으면 매번) 이 질문으로 되묻는다
+  confirm    되물음이 끝난 뒤의 일반 응답을 이 확정 요청으로 바꾼다. [tap:<action_id>] 면 확정 완료로 답한다
 """
 
 from __future__ import annotations
@@ -57,12 +61,28 @@ class LatencyRange(BaseModel):
     max: float = 8
 
 
+class AskBack(BaseModel):
+    text: str = "몇 시로 할까요?"
+    choices: list[str] = Field(default_factory=list)
+    # 스레드당 되묻는 횟수. None 이면 매번
+    times: int | None = None
+
+
+class ConfirmStep(BaseModel):
+    text: str
+    summary: str
+    action_id: str = "btn_confirm"
+    done_text: str = "확정되었습니다."
+
+
 class MockConfig(BaseModel):
     latency_s: LatencyRange = Field(default_factory=LatencyRange)
     fail_rate: float = 0.0
     needs_input_rate: float = 0.0
     unavailable_after: int | None = None
     replies: dict[str, str] = Field(default_factory=dict)
+    ask_back: AskBack | None = None
+    confirm: ConfirmStep | None = None
 
 
 class MockAdapter(BotAdapter):
@@ -131,15 +151,33 @@ class MockAdapter(BotAdapter):
             not deterministic and tap is None and self._rng.random() < self.mock.needs_input_rate
         )
         meta: dict[str, Any] = {}
+        scripted = self.mock.ask_back
+        if not directives and tap is None and scripted is not None:
+            asked = int(thread.data.get("ask_backs", 0))
+            if scripted.times is None or asked < scripted.times:
+                thread.data["ask_backs"] = asked + 1
+                ask_back = True
+        confirm = self.mock.confirm
         if tap is not None:
-            label = thread.data.get("buttons", {}).get(tap, tap)
-            reply = f"'{label}' 선택하셨습니다." + (f" {body}" if body else "")
+            if confirm is not None and tap == confirm.action_id:
+                reply = confirm.done_text
+            else:
+                label = thread.data.get("buttons", {}).get(tap, tap)
+                reply = f"'{label}' 선택하셨습니다." + (f" {body}" if body else "")
         elif "confirm" in directives:
             reply = "KTX 서울→부산 11/12 07:00 결제 58,800원. 진행할까요?"
             meta["confirmation"] = {"summary": "KTX 서울→부산 11/12 07:00 결제 58,800원", "action_id": "btn_pay"}
         elif ask_back:
-            reply = "몇 시로 할까요?"
-            meta["choices"] = ["18:00", "18:30", "19:00"]
+            if scripted is not None and not directives:
+                reply = scripted.text
+                if scripted.choices:
+                    meta["choices"] = list(scripted.choices)
+            else:
+                reply = "몇 시로 할까요?"
+                meta["choices"] = ["18:00", "18:30", "19:00"]
+        elif confirm is not None and not directives:
+            reply = confirm.text
+            meta["confirmation"] = {"summary": confirm.summary, "action_id": confirm.action_id}
         else:
             reply = next((tpl for kw, tpl in self.mock.replies.items() if kw in body), None) or f"echo: {body}"
         if "image" in directives:
