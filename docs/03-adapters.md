@@ -1,0 +1,323 @@
+# 멀티봇 어댑터 인터페이스 명세
+
+> 작성일 2026-11-08
+
+## 1. 목적과 범위
+
+이 문서는 Claude Code가 보는 어댑터의 MCP 툴 계약, 허브 API가 쓰는 관리 엔드포인트, 어댑터 구현자가 따를 베이스 클래스와 봇별 구현 요점을 확정한다. 이 문서대로 만들면 어댑터는 서로를 몰라도 되고, 봇 추가는 어댑터 하나 추가로 끝난다.
+
+범위 안: `ask`·`status` 툴, `AskResult`·`structured` 스키마, 생명주기와 타임아웃, 관리 엔드포인트, Vooy·뮤즈·피클·Mock 네 어댑터의 설계.
+
+범위 밖: Claude Code의 시스템 프롬프트와 봇 선택 규칙(오케스트레이터 설계 문서), 허브 UI(UI 설계 문서), 배포 세부(아키텍처 설계서 7장).
+
+언어·런타임: Python 3.12, 공식 `mcp` SDK, streamable HTTP 전송. 어댑터 하나 = 컨테이너 하나 = 프로세스 하나.
+
+## 2. MCP 툴 계약
+
+어댑터마다 MCP 서버 이름은 봇 이름(`vooy`, `muse`, `pickle`, `mock`)이고, Claude Code에는 `mcp__<bot>__ask`, `mcp__<bot>__status`로 보인다. 툴은 이 둘뿐이다.
+
+**`ask` — 봇에게 묻고 답을 받는다**
+
+```json
+{
+  "name": "ask",
+  "description": "<봇 설명: 잘하는 일, 못하는 일, 평균 응답 시간, 한국어 가능 여부>",
+  "inputSchema": {
+    "type": "object",
+    "required": ["text", "thread_id"],
+    "properties": {
+      "text":       {"type": "string", "maxLength": 4000},
+      "thread_id":  {"type": "string", "description": "허브 세션 ID. 같은 ID면 같은 봇 대화를 잇는다"},
+      "timeout_s":  {"type": "integer", "default": 120, "minimum": 10, "maximum": 240},
+      "reset":      {"type": "boolean", "default": false, "description": "true면 봇 대화를 새로 시작한 뒤 보낸다"}
+    }
+  }
+}
+```
+
+출력(`AskResult`)은 항상 성공 응답 형태로 돌려준다. 오류도 필드다.
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `bot` | string | 봇 이름 |
+| `ok` | bool | 봇 응답을 받았으면 true. 타임아웃·장애면 false |
+| `raw` | string | 봇 원문. 여러 메시지면 `\n\n`으로 이어 붙임. ok=false면 빈 문자열 |
+| `structured` | object | 3장 스키마. 없으면 `{}` |
+| `needs_input` | bool | 봇이 되물었다고 판단되면 true (물음표로 끝나거나 선택지 버튼이 있을 때) |
+| `error` | string \| null | `timeout` · `unavailable` · `login_required` · `rate_limited` · `internal` |
+| `latency_ms` | int | 전송부터 응답 확정까지 |
+| `message_ids` | string\[\] | 어댑터 내부 메시지 식별자. 디버깅용 |
+
+**`status` — 호출 전 가용성 확인**
+
+입력 없음. 출력:
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `available` | bool | 지금 `ask`가 성공할 가능성이 있는지 |
+| `reason` | string \| null | 불가 사유. `login_required` · `disabled` · `backend_down` · `cooldown` |
+| `last_ok_at` | string \| null | ISO 8601 |
+| `queue_depth` | int | 대기 중 요청 수 |
+| `avg_latency_ms` | int | 최근 10건 평균 |
+
+**규칙**
+
+- `text`는 그대로 봇에 전달한다. 어댑터는 내용을 고치지 않는다. 봇 이름·맥락을 붙이는 건 Claude Code 몫이다.
+- `thread_id`당 봇 대화 하나. 어댑터가 처음 보는 `thread_id`면 새 봇 대화를 만든다.
+- 같은 어댑터에 동시 `ask`가 오면 큐에서 순서대로 처리한다. Claude Code가 병렬로 불러도 어댑터 안에서는 직렬이다.
+- MCP 레벨 예외를 던지지 않는다. 던지면 Claude Code 실행이 통째로 실패한다.
+
+## 3. structured 응답 스키마
+
+봇 응답에서 텍스트 외의 요소를 잃지 않기 위한 공통 스키마다. 어댑터가 뽑을 수 있는 것만 채우고, 못 뽑는 필드는 생략한다. UI는 이 스키마로 봇 말풍선 안에 버튼·카드를 그린다.
+
+```json
+{
+  "buttons": [{"label": "예약 확정", "action_id": "btn_3", "kind": "callback|url|reply"}],
+  "links":   [{"title": "네이버 예약", "url": "https://..."}],
+  "cards":   [{"title": "OO식당", "subtitle": "강남 · 한식", "body": "18:30 2명 가능", "url": "https://...", "image_url": "https://..."}],
+  "images":  [{"url": "https://...", "alt": "메뉴 사진"}],
+  "choices": ["18:00", "18:30", "19:00"],
+  "confirmation_required": {"summary": "KTX 서울→부산 11/12 07:00 결제 58,800원", "action_id": "btn_pay"}
+}
+```
+
+| 필드 | 출처 | 비고 |
+| --- | --- | --- |
+| `buttons` | 텔레그램 인라인 키보드, 앱 화면의 버튼 노드 | `action_id`는 어댑터가 만든 식별자. 후속 `ask`의 `text`에 `[tap:btn_3]`을 넣으면 어댑터가 그 버튼을 누른다 |
+| `links` | 메시지 안 URL | 본문에서 추출 |
+| `cards` | 텔레그램 미디어 그룹, 앱의 리스트 아이템 | 식당·상품·항공권 같은 선택지 |
+| `images` | 이미지 첨부 | URL은 어댑터가 자기 스토리지에 복사한 로컬 경로. 외부 URL 그대로 노출 안 함 |
+| `choices` | 되물음의 선택지 (버튼이 아닌 텍스트 나열) | `needs_input=true`와 함께 |
+| `confirmation_required` | 결제·예약 확정 단계 | UI가 눈에 띄게 표시. Claude Code는 이 단계를 절대 자동으로 넘기지 않고 사용자에게 묻는다 |
+
+**버튼 누르기**: 별도 툴을 두지 않는다. `ask`의 `text`가 `[tap:<action_id>]`로 시작하면 어댑터가 해당 버튼을 누르고 나머지 텍스트가 있으면 이어서 보낸다. `action_id`는 그 `thread_id`의 직전 응답에서만 유효하다. 툴 하나로 유지하면 Claude Code의 허용 툴 목록이 늘지 않는다.
+
+**원문 보존 원칙**: `raw`에는 버튼 라벨도 `[버튼: 예약 확정]` 형태로 섞어 넣는다. `structured`를 못 쓰는 상황에서도 Claude가 원문만 보고 상황을 파악할 수 있게 한다.
+
+## 4. ask 생명주기
+
+&#91;embedded content: ask 생명주기 · 5상태\]
+
+| 상태 | 하는 일 | 시간 제한 |
+| --- | --- | --- |
+| queued | 어댑터 큐에서 차례 대기. `status.queue_depth`에 반영 | `timeout_s`에 포함. 큐에서만 60초 넘으면 `error=cooldown`으로 실패 |
+| sending | `_send` 훅 실행. 로그인 상태 확인 포함 | 15초 |
+| waiting | `_wait_reply` 훅. 봇 메시지가 멈출 때까지 수집 | `timeout_s` 잔여분 |
+| done | `AskResult(ok=true)` 반환. `needs_input` 판정 | — |
+| failed | `AskResult(ok=false, error=...)` 반환 | — |
+
+**응답 확정 규칙** (`_wait_reply` 공통): 첫 메시지가 온 뒤 `quiet_s`(기본 2.5초) 동안 새 메시지가 없으면 응답이 끝난 것으로 본다. 봇이 "찾는 중…" 같은 진행 메시지를 보내면 봇별 `progress_patterns`에 맞춰 무시하고 계속 기다린다. 타이핑 표시(텔레그램 typing, 웹 스피너)가 있으면 그게 꺼지는 시점을 우선한다.
+
+**재시도**: waiting 타임아웃 1회차는 같은 `text`를 한 번 더 보낸다. 단, `[tap:]`으로 시작하는 버튼 누르기와 `confirmation_required` 단계의 확정 메시지는 재시도하지 않는다. 중복 결제·예약을 막기 위해서다.
+
+**needs\_input 판정**: `choices`나 `buttons`가 있거나, 원문 마지막 문장이 물음표로 끝나거나, 봇별 `question_patterns`에 맞으면 true. 오판은 허용한다. Claude Code가 원문을 읽고 최종 판단한다.
+
+## 5. 관리 HTTP 엔드포인트
+
+MCP와 같은 프로세스가 별도 포트(기본 9100)로 연다. 허브 API 전용이며 Claude Code는 모른다. 인증은 compose secret으로 주입한 공유 토큰을 `X-Hub-Token` 헤더로 보낸다. MCP 포트(기본 9000)도 같은 토큰을 요구해 내부망 안 다른 컨테이너의 무단 호출을 막는다.
+
+| 메서드·경로 | 요청 | 응답 | 동작 |
+| --- | --- | --- | --- |
+| `GET /health` | — | `status` 툴과 같은 JSON + `version`, `uptime_s` | 허브가 30초마다 폴링. 봇 백엔드에 실제 핑은 하지 않고 마지막 결과를 돌려준다 |
+| `POST /probe` | — | `health`와 같음 | 봇 백엔드에 실제로 가벼운 확인(텔레그램 `get_me`, 페이지 로드, 앱 포그라운드)을 한 뒤 응답. 허브의 "상태 새로고침" 버튼 |
+| `POST /login/start` | `{}` | `{"flow": "code" \| "vnc", "hint": "...", "vnc_url": "..."}` | 로그인 흐름 시작. 텔레그램은 코드 입력형, 뮤즈·피클은 noVNC URL 반환 |
+| `POST /login/submit` | `{"code": "12345"}` 또는 `{"password": "..."}` | `{"ok": true}` 또는 `{"ok": false, "next": "password"}` | 코드 입력형 로그인의 다음 단계 |
+| `POST /login/complete` | `{}` | `{"ok": bool}` | VNC 수동 로그인이 끝났다고 운영자가 알림. 어댑터가 로그인 상태를 저장(쿠키·스냅샷)하고 `available` 갱신 |
+| `POST /reset` | `{"thread_id": "..."}` 또는 `{}` | `{"ok": true}` | 특정 봇 대화 초기화. 빈 바디면 전체 |
+| `POST /enable`, `POST /disable` | `{}` | `{"enabled": bool}` | 운영자 토글. disable이면 `status.reason=disabled` |
+| `GET /threads` | — | `[{"thread_id", "last_at", "message_count"}]` | 디버깅·정리용 |
+| `GET /logs?since=` | — | 최근 `ask` 기록 | 허브의 봇 상태 패널 상세 |
+
+**상태 보고 의무**: 어댑터가 `login_required`·`backend_down`을 감지하면 기다리지 않고 허브의 `POST /internal/bot-status` 웹훅을 호출한다. 폴링 간격보다 빨리 UI에 반영하기 위해서다. 웹훅 실패는 무시한다(다음 폴링이 잡는다).
+
+## 6. 공통 베이스 클래스와 설정 파일
+
+베이스 클래스가 큐·타임아웃·재시도·`AskResult` 조립·MCP 서버·관리 HTTP를 전부 맡는다. 봇별 구현은 훅 다섯 개만 채운다.
+
+```python
+# adapters/base.py
+class BotAdapter(ABC):
+    name: str                       # "vooy"
+    description: str                # ask 툴 description
+    quiet_s: float = 2.5            # 응답 확정 침묵 시간
+    progress_patterns: list[str] = []   # 무시할 진행 메시지 정규식
+    question_patterns: list[str] = []   # needs_input 힌트 정규식
+    min_interval_s: float = 1.0     # 연속 전송 최소 간격
+
+    # --- 봇별 구현 훅 ---
+    async def _ensure_ready(self) -> None: ...            # 로그인 상태 확인, 아니면 LoginRequired 발생
+    async def _send(self, thread: Thread, text: str, tap: str | None) -> None: ...
+    async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]: ...
+    async def _extract(self, msgs: list[RawMessage]) -> tuple[str, Structured]: ...
+    async def _login_flow(self) -> LoginFlow: ...        # CodeLogin | VncLogin
+
+    # --- 베이스가 제공 ---
+    async def ask(self, text, thread_id, timeout_s=120, reset=False) -> AskResult
+    async def status(self) -> Status
+    async def reset(self, thread_id: str | None) -> None
+    def serve(self) -> None            # MCP(9000) + 관리 HTTP(9100) 동시 기동
+```
+
+`Thread`는 어댑터가 `thread_id`에 매핑해 보관하는 봇 쪽 대화 핸들이다(텔레그램은 채팅 ID + 마지막 메시지 ID, 뮤즈는 브라우저 탭·대화 URL, 피클은 앱의 대화 화면 식별자). 디스크에 JSON으로 저장해 재시작 후에도 이어진다.
+
+**`_collect` 계약**: `deadline`까지 새 메시지를 모아 반환한다. 베이스가 `quiet_s` 침묵 판정과 `progress_patterns` 필터를 적용하므로 훅은 "지금까지 도착한 메시지"만 성실히 반환하면 된다.
+
+**설정 파일** (`adapters/<bot>/config.yaml`, 비밀값은 env로):
+
+```yaml
+name: vooy
+description: |
+  한국 생활 서비스(예약·주문·검색·일정)에 강한 AI 에이전트. 텔레그램으로 응답하며
+  보통 20~60초 걸린다. 한국어 전용. 결제·예약 확정 전에 반드시 확인을 요구한다.
+timeouts: {default_s: 120, send_s: 15, quiet_s: 2.5}
+queue: {max_depth: 5, max_wait_s: 60}
+progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있"]
+question_patterns: ["몇 명", "언제", "어디", "\\?$"]
+health: {probe_interval_s: 300}
+hub_webhook: http://hub-api:8000/internal/bot-status
+```
+
+`description`은 그대로 MCP 툴 description이 된다. 봇의 강점·약점·응답 시간·언어·확정 정책을 적어야 Claude Code가 봇을 고를 수 있다.
+
+**디렉터리**
+
+```
+adapters/
+  base.py            # BotAdapter, AskResult, Structured, Thread, serve()
+  mcp_server.py      # ask/status 툴 등록, streamable HTTP
+  admin_api.py       # 관리 HTTP
+  vooy/  {adapter.py, config.yaml, Dockerfile}
+  muse/  {adapter.py, config.yaml, Dockerfile}
+  pickle/{adapter.py, config.yaml, Dockerfile}
+  mock/  {adapter.py, config.yaml, Dockerfile}
+```
+
+## 7. Vooy 어댑터
+
+전용 텔레그램 계정의 유저 세션으로 Vooy 봇과 1:1 채팅한다. 가장 먼저 만들고, 다른 어댑터의 기준 구현이 된다.
+
+| 항목 | 설계 |
+| --- | --- |
+| 라이브러리 | Telethon. `api_id`·`api_hash`는 my.telegram.org에서 전용 계정으로 발급, env 주입 |
+| 세션 | `StringSession`을 암호화 볼륨의 파일로 저장. 컨테이너 재시작 시 재로그인 불필요 |
+| 로그인 흐름 | `CodeLogin`: `/login/start` → 텔레그램이 코드 전송 → `/login/submit {code}` → 2단계 비밀번호가 있으면 `next: password` → `/login/submit {password}` |
+| 대상 | Vooy 봇 username(설정값). 첫 `_ensure_ready`에서 entity를 resolve해 캐시 |
+| `_send` | `client.send_message(bot, text)`. `tap`이 있으면 직전 메시지의 인라인 버튼을 `message.click(data=...)`. `min_interval_s=3` |
+| `_collect` | `events.NewMessage(from_users=bot)` 핸들러로 수신 큐에 쌓고, `deadline`까지 꺼낸다. `events.MessageEdited`도 수집(봇이 진행 메시지를 편집해 결과로 바꾸는 패턴 대응) |
+| `_extract` | 텍스트는 `message.message`, 인라인 버튼은 `reply_markup.rows`에서 `buttons[]`로, 미디어 그룹은 `cards[]`로, 사진은 다운로드해 `images[]` 로컬 경로. 엔티티의 URL은 `links[]` |
+| 스레드 | Vooy는 1:1 채팅이 하나라 봇 쪽 대화는 공유된다. `thread_id` 전환 시 `reset=true`면 Vooy의 새 대화 명령(확인 필요, 미결)을 보내고, 아니면 그대로 이어서 보낸다. `Thread`에는 마지막 수신 메시지 ID만 보관해 `_collect`가 그 이후 메시지만 보게 한다 |
+| 타이핑 신호 | `events.UserUpdate`로 봇의 typing 상태를 받아, typing이 꺼진 뒤 `quiet_s`를 센다 |
+| 레이트 리밋 | Telethon의 `FloodWaitError`를 잡아 `error=rate_limited` + `status.reason=cooldown`(대기 초 포함)으로 보고 |
+| 프로브 | `client.get_me()` 성공 + 봇 entity resolve 성공이면 available |
+
+**리스크와 대응**
+
+- 텔레그램 계정 제한: 전용 계정, 메시지 간격 3초, 하루 전송 상한(설정, 기본 300건)을 어댑터가 강제한다.
+- Vooy가 여러 메시지로 쪼개 답할 때: `quiet_s`로 묶는다. 쪼개진 메시지 사이 간격이 2.5초를 넘기는 경우가 관찰되면 Vooy 설정의 `quiet_s`만 올린다.
+- Vooy 봇 쪽 대화 스레드가 허브 세션별로 분리되지 않는 점: 1차에서는 허용. Claude Code 시스템 프롬프트에 "Vooy는 직전 대화를 기억할 수 있으니 필요한 맥락을 메시지에 포함하라"를 둔다.
+
+## 8. 뮤즈 어댑터
+
+muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정적이고 서버에 에뮬레이터가 필요 없다. 지역 제약은 컨테이너 egress를 VPN으로 돌려 푼다.
+
+| 항목 | 설계 |
+| --- | --- |
+| 라이브러리 | Playwright(Chromium), `launch_persistent_context(user_data_dir=...)`로 프로필 디렉터리에 쿠키 유지 |
+| 로그인 흐름 | `VncLogin`: 헤드풀 Chromium + Xvfb + noVNC. `/login/start`가 noVNC URL 반환 → 운영자가 Meta 계정으로 수동 로그인 → `/login/complete` → 어댑터가 `storage_state`를 백업 |
+| 네트워크 | VPN 사이드카(WireGuard 또는 상용 VPN의 CLI 컨테이너)의 네트워크 네임스페이스를 공유. 어댑터 컨테이너 자체는 외부 라우트 없음. 로컬 노출은 9000·9100뿐 |
+| 스레드 | `thread_id`마다 muse.ai의 대화 하나. 새 `thread_id`면 "새 대화" 버튼 클릭 후 URL을 `Thread`에 저장. 재방문은 그 URL로 `page.goto` |
+| `_send` | 입력창 셀렉터에 `fill` 후 Enter. `tap`은 응답 영역의 버튼 텍스트로 클릭. 셀렉터는 `selectors.yaml`로 분리해 UI 변경 시 코드 수정 없이 대응 |
+| `_collect` | 마지막 어시스턴트 메시지 노드의 `innerText`를 500ms 간격으로 비교. 변화가 멈추고 스트리밍 표시(스피너·커서)가 사라지면 확정. `quiet_s`는 1.5 |
+| `_extract` | 메시지 노드의 텍스트, `a[href]`는 `links[]`, 버튼류 요소는 `buttons[]`(`action_id`=텍스트 해시), 이미지는 다운로드해 `images[]`. 뮤즈가 작업 실행 확인을 요구하는 UI(결제·전송 승인)는 `confirmation_required`로 매핑 |
+| 프로브 | `page.goto(muse.ai)` 후 로그인 상태 셀렉터 존재 확인. 로그인 페이지로 리다이렉트되면 `login_required` |
+| 동시성 | 브라우저 컨텍스트 하나, 탭 하나. 큐 직렬 처리가 전제 |
+
+**리스크와 대응**
+
+- DOM 변경으로 셀렉터가 깨짐: `selectors.yaml` + 프로브가 핵심 셀렉터 존재를 검사해 깨지면 `backend_down`으로 보고. 수정은 YAML만.
+- 봇 감지·캡차: 헤드풀 Chromium, 실제 프로필, 타이핑 지연(`type` with delay) 사용. 캡차가 뜨면 `login_required`로 보고하고 noVNC로 운영자가 푼다.
+- 지역 차단이 계정 레벨이라 VPN으로도 안 풀리는 경우: 어댑터를 Meta Model API 기반 `muse-api` 어댑터로 교체. 인터페이스는 같으므로 Claude Code·허브는 영향 없음. 이 대체 어댑터는 "에이전트 실행 없이 답만 하는 뮤즈"임을 `description`에 명시한다.
+
+## 9. 피클 어댑터
+
+안드로이드 에뮬레이터 안의 피클 앱을 Appium으로 조작한다. VM 2에서 돌고, 허브와는 WireGuard 사설망으로만 연결된다.
+
+| 항목 | 설계 |
+| --- | --- |
+| 에뮬레이터 | Android SDK 에뮬레이터, x86\_64 시스템 이미지(API 34, Google APIs), KVM 가속. 해상도 1080×2400, 한국어 로케일 |
+| 자동화 | Appium 2 + UiAutomator2 드라이버. 접근성 트리(`page_source`)에서 텍스트 노드를 읽는다. OCR(Tesseract)은 접근성 라벨이 없는 뷰에만 보조로 |
+| 로그인 흐름 | `VncLogin`: 에뮬레이터 화면을 noVNC로 노출. 운영자가 앱에서 로그인·권한 승인 → `/login/complete` → 어댑터가 `adb emu avd snapshot save logged_in` |
+| 스냅샷 | 로그인 상태 스냅샷을 볼륨에 보관. 재시작·온디맨드 기동 시 `-snapshot logged_in`으로 복원 |
+| 스레드 | 피클 앱의 대화 목록에서 `thread_id`에 대응하는 대화를 찾아 진입. 새 `thread_id`면 새 대화 생성 후 제목을 `thread_id`로 바꿔 식별(앱이 제목 편집을 지원하는지 확인 필요, 미결) |
+| `_send` | 입력창 element에 `send_keys` 후 전송 버튼 탭. 한글 입력은 Appium 유니코드 키보드 사용. `tap`은 직전 응답 영역의 버튼 element를 `accessibility id` 또는 텍스트로 찾아 클릭 |
+| `_collect` | 1초 간격으로 `page_source` diff. 새 어시스턴트 말풍선 노드가 추가되거나 마지막 말풍선 텍스트가 바뀌면 수집. 피클은 실행 진행을 카드로 보여주므로 `progress_patterns`에 진행 카드 텍스트 등록. `quiet_s`는 4 |
+| `_extract` | 말풍선 텍스트, 버튼 노드(`clickable=true`)는 `buttons[]`, 리스트 아이템은 `cards[]`. 이미지는 `screenshot` 후 element bounds로 크롭해 `images[]`. 결제·예약 승인 시트는 `confirmation_required` |
+| 프로브 | 앱이 포그라운드인지 + 대화 목록 화면 element 존재. 로그인 화면이면 `login_required`. 에뮬레이터 응답 없으면 재부팅 후 스냅샷 복원, 그래도 안 되면 `backend_down` |
+| 기동 모드 | 설정 `mode: always_on \| on_demand`. on\_demand는 `ask` 진입 시 에뮬레이터 부팅(스냅샷 복원 30\~60초, `send_s`에 포함되지 않게 별도 `boot_s=90`), 유휴 10분 후 종료 |
+
+**리스크와 대응**
+
+- 앱 업데이트로 element 구조 변경: 셀렉터를 `selectors.yaml`로 분리. 에뮬레이터의 자동 업데이트를 끄고 운영자가 수동으로 올린 뒤 셀렉터를 갱신한다.
+- 에뮬레이터 탐지(루팅·에뮬레이터 체크): Google Play 시스템 이미지 + 기본 설정으로 시도. 막히면 실기기(안드로이드 폰 + USB) 워커로 전환. 어댑터 코드는 `ANDROID_SERIAL`만 바뀐다.
+- 피클의 클라우드 브라우저가 느린 작업(전화 걸기 등): `timeout_s` 상한 240까지 Claude Code가 지정 가능. 그 이상은 봇이 알아서 끝내고 사용자가 앱에서 확인하는 것으로 둔다.
+
+## 10. Mock 어댑터와 봇 추가 절차
+
+**Mock 어댑터**는 베이스 클래스 위에 외부 호출 없이 동작한다. 허브·러너·UI를 실제 봇 없이 끝까지 검증하는 용도이며, 이름을 바꿔 여러 개 띄울 수 있다(`mock-a`, `mock-b`).
+
+```yaml
+name: mock-a
+description: 테스트용 가짜 봇. 식당 추천과 날씨에 답한다.
+mock:
+  latency_s: {min: 2, max: 8}
+  fail_rate: 0.1            # ok=false, error=timeout
+  needs_input_rate: 0.2     # 되물음 + choices
+  unavailable_after: null   # N번째 호출부터 login_required (장애 시나리오)
+  replies:                  # 키워드 → 템플릿. 없으면 echo
+    식당: "강남 OO식당 18:30 2명 가능합니다. [버튼: 예약] [버튼: 다른 곳]"
+    날씨: "내일 서울 맑음, 최고 14도"
+```
+
+`[버튼: X]` 표기는 `buttons[]`로도 파싱돼 `[tap:]` 경로까지 테스트된다.
+
+**봇 추가 절차** (새 봇 = 어댑터 하나)
+
+1. `adapters/<bot>/` 디렉터리 생성, `BotAdapter` 상속해 훅 5개 구현. 로그인 방식에 따라 `CodeLogin` 또는 `VncLogin` 선택.
+2. `config.yaml`에 `description`·타임아웃·패턴 작성. description은 Claude Code가 읽는 유일한 봇 설명이다.
+3. `Dockerfile` 작성, `docker-compose.yml`에 서비스 추가(내부망, 볼륨, secret).
+4. 허브 `bots.yaml`에 `{name, mcp_url, admin_url}` 한 줄 추가. 허브가 재시작 없이 다시 읽는다.
+5. 러너는 `bots.yaml`과 헬스체크 결과로 `mcp.json`을 자동 생성하므로 수정 없음. 오케스트레이터 시스템 프롬프트도 봇 목록을 하드코딩하지 않으므로 수정 없음.
+6. Mock과 같은 계약 테스트(11장)를 통과시킨다.
+
+허브 API·러너·UI 코드는 손대지 않는다. 손대야 한다면 설계 위반이다.
+
+## 11. 테스트 기준과 미결 사항
+
+**계약 테스트** (모든 어댑터 공통, `tests/contract/`)
+
+| 테스트 | 기대 |
+| --- | --- |
+| `ask` 정상 | `ok=true`, `raw` 비어 있지 않음, `latency_ms > 0`, `AskResult` 스키마 검증 통과 |
+| `ask` 타임아웃 | `timeout_s=10`으로 느린 응답 유도 → 재시도 1회 후 `ok=false, error=timeout`, MCP 예외 없음 |
+| `ask` 로그인 만료 | 세션 제거 후 호출 → `error=login_required`, `status.reason=login_required`, 허브 웹훅 호출됨 |
+| 동시 `ask` 3건 | 직렬 처리, `queue_depth` 최대 2, 순서 보존 |
+| `thread_id` 분리 | 두 스레드에 교차 전송 → 각 스레드 응답이 섞이지 않음(Mock·뮤즈·피클), Vooy는 문서화된 공유 동작 확인 |
+| `[tap:]` | 직전 응답의 `action_id`로 버튼 클릭 성공, 존재하지 않는 `action_id`는 `error=internal` + 설명 |
+| `status` | 프로브 전후 값 변화, `avg_latency_ms` 갱신 |
+| 관리 HTTP 인증 | 토큰 없는 요청 401 |
+| 재시작 복원 | 컨테이너 재시작 후 `status.available=true`, 기존 `thread_id`로 이어서 `ask` 성공 |
+
+**실봇 스모크 테스트** (수동, 어댑터 착수 완료 기준)
+
+- Vooy: "내일 점심 강남 한식 2명 예약 가능한 곳" → 응답 수신, 버튼 파싱, `[tap:]`으로 선택지 하나 누르기까지.
+- 뮤즈: 로그인 후 간단한 질문 1건 + 새 대화 생성 + 재방문.
+- 피클: 스냅샷 복원 후 대화 1건, 에뮬레이터 재부팅 후 다시 1건.
+
+**미결 사항**
+
+- [ ] Vooy의 "새 대화" 명령이 있는지, 없으면 `reset`을 어떻게 구현할지 (실사용 확인)
+- [ ] 피클 앱이 대화 제목 편집을 지원하는지. 안 되면 대화 생성 순서로 식별
+- [ ] 뮤즈 VPN 경유 로그인이 계정 지역 체크를 통과하는지 (요구사항 미결과 동일)
+- [ ] 피클 `on_demand` 모드의 부팅 지연을 Claude Code 타임아웃 안에 어떻게 넣을지 — `status`가 `booting`을 돌려주고 Claude가 기다리게 할지, 허브가 미리 깨울지
+- [ ] `images[]` 로컬 경로를 UI가 어떻게 받을지 — 허브가 어댑터 스토리지를 프록시하는 엔드포인트 필요 (UI 설계에서)
