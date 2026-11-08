@@ -35,6 +35,14 @@ class RemoteRunner(Runner):
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def ping(self) -> bool:
+        """러너 컨테이너가 응답하는지(봇 상태 패널 Claude Code 섹션). Claude Code 로그인 여부는 모른다."""
+        try:
+            r = await self._client.get("/healthz", timeout=3)
+        except httpx.HTTPError:
+            return False
+        return r.status_code == 200
+
     async def stop(self, run_id: uuid.UUID) -> bool:
         try:
             r = await self._client.post(f"/runs/{run_id}/stop")

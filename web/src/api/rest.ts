@@ -1,5 +1,5 @@
 // 허브 REST fetch 래퍼. 인증은 HttpOnly 쿠키라 credentials 만 맞추면 된다.
-import type { BotInfo, MessageOut, SessionOut } from "./types";
+import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, LoginSubmitResult, MessageOut, SessionOut } from "./types";
 
 export class HttpError extends Error {
   constructor(
@@ -53,4 +53,28 @@ export const api = {
     request<MessageOut[]>("GET", `/api/sessions/${id}/messages?since_seq=${sinceSeq}`),
 
   listBots: () => request<BotInfo[]>("GET", "/api/bots"),
+
+  // 봇 관리 (허브가 어댑터 관리 HTTP 를 대신 부른다, docs/05-ui.md 4장)
+  loginStart: (bot: string) => request<LoginStart>("POST", `/api/bots/${enc(bot)}/login/start`),
+  loginSubmit: (bot: string, body: { code: string } | { password: string }) =>
+    request<LoginSubmitResult>("POST", `/api/bots/${enc(bot)}/login/submit`, body),
+  loginComplete: (bot: string) => request<{ ok: boolean }>("POST", `/api/bots/${enc(bot)}/login/complete`),
+  probeBot: (bot: string) => request<BotStatusPayload>("POST", `/api/bots/${enc(bot)}/probe`),
+  setBotEnabled: (bot: string, enabled: boolean) =>
+    request<BotStatusPayload>("POST", `/api/bots/${enc(bot)}/${enabled ? "enable" : "disable"}`),
+  resetBot: (bot: string, sessionId: string | null) =>
+    request<{ ok: boolean }>("POST", `/api/bots/${enc(bot)}/reset`, sessionId ? { session_id: sessionId } : {}),
+  botLogs: (bot: string) => request<BotLogEntry[]>("GET", `/api/bots/${enc(bot)}/logs`),
+  restartSession: (id: string) => request<{ ok: boolean; had_session: boolean }>("POST", `/api/sessions/${id}/restart`),
+  claudeStatus: () => request<ClaudeStatus>("GET", "/api/claude/status"),
 };
+
+const enc = encodeURIComponent;
+
+/** 봇 이미지 URL. 어댑터 로컬 경로(/images/<id>)는 허브 프록시로 바꾼다(docs/05-ui.md 3장) */
+export function imageSrc(bot: string, url: string): string | null {
+  const m = /^\/images\/([0-9A-Za-z_-]+)$/.exec(url);
+  if (m) return `/api/bots/${enc(bot)}/images/${m[1]}`;
+  if (/^https:\/\//.test(url)) return url;
+  return null;
+}

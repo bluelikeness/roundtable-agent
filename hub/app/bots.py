@@ -1,7 +1,7 @@
 """봇 등록(bots.yaml)과 실행 직전 가용 봇 선택 (02 6장 bot 상태 머신, 03 10장).
 
 Claude 에 노출되는 봇은 enabled·available 둘 다 참인 봇만이다. bot 테이블에 행이 없는 봇은
-헬스체크 결과가 아직 없는 것이라 일단 노출한다(헬스체크 폴링은 봇 상태 패널 단계에서 붙는다).
+헬스체크 결과가 아직 없는 것이라 일단 노출한다. 헬스체크 폴링은 app/bot_monitor.py 가 한다.
 """
 
 from pathlib import Path

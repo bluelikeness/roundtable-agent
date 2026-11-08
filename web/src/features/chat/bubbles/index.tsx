@@ -11,9 +11,15 @@ import type {
   SystemItem,
   UserItem,
 } from "../../../store/chat";
+import { CANCEL_TEXT, CONFIRM_TEXT, isConfirmQuestion } from "../../../lib/confirm";
+import { linkify } from "../../../lib/linkify";
+import { useMobile } from "../../../lib/media";
 import { absolute, elapsedSince, seconds } from "../../../lib/time";
+import { ConfirmBox, hasInside, parseStructured, StructuredInside } from "../../structured";
 
+// 봇 원문 접기: 데스크톱 20줄, 모바일 10줄 (docs/05-ui.md 2·7장)
 const RAW_FOLD_LINES = 20;
+const RAW_FOLD_LINES_MOBILE = 10;
 const NOTE_FOLD_CHARS = 160;
 
 export function User({ item }: { item: UserItem }) {
@@ -53,37 +59,61 @@ function BotHead({ bot, color, extra }: { bot: string; color: string; extra?: st
   );
 }
 
-export function BotReply({ item, color }: { item: BotItem; color: string }) {
+interface BotReplyProps {
+  item: BotItem;
+  color: string;
+  /** 이 봇의 가장 최근 응답인지(아니면 버튼·선택지 만료). 기본 true */
+  active?: boolean;
+  /** 칩 클릭 → 입력을 대신 써서 보낸다 */
+  onSend?: (text: string) => void;
+}
+
+export function BotReply({ item, color, active = true, onSend }: BotReplyProps) {
+  const mobile = useMobile();
+  const fold = mobile ? RAW_FOLD_LINES_MOBILE : RAW_FOLD_LINES;
   const lines = item.raw.split("\n");
-  const long = lines.length > RAW_FOLD_LINES;
+  const long = lines.length > fold;
   const [open, setOpen] = useState(false);
-  const shown = long && !open ? lines.slice(0, RAW_FOLD_LINES).join("\n") : item.raw;
+  const shown = long && !open ? lines.slice(0, fold).join("\n") : item.raw;
+  const s = parseStructured(item.structured);
   return (
-    <div className="row left">
+    <div className="row left column">
       <div
         className="bubble bot"
         style={{ borderColor: color, background: `color-mix(in srgb, ${color} 7%, var(--bg))` }}
         title={absolute(item.ts)}
       >
         <BotHead bot={item.bot} color={color} extra={item.latencyMs != null ? seconds(item.latencyMs) : undefined} />
-        <div className="raw">{shown}</div>
-        {item.needsInput && <div className="tag">봇이 추가 정보를 묻고 있습니다</div>}
+        <div className="raw">{linkify(shown)}</div>
         {long && (
           <button className="link" onClick={() => setOpen(!open)}>
-            {open ? "접기" : `더 보기 (${lines.length - RAW_FOLD_LINES}줄)`}
+            {open ? "접기" : `더 보기 (${lines.length - fold}줄)`}
           </button>
         )}
+        {hasInside(s) && (
+          <div className="structured">
+            <StructuredInside s={s} bot={item.bot} color={color} active={active && !!onSend} onSend={(t) => onSend?.(t)} />
+          </div>
+        )}
+        {item.needsInput && <div className="tag">봇이 추가 정보를 묻고 있습니다</div>}
       </div>
+      {s.confirmation_required && <ConfirmBox summary={s.confirmation_required.summary} />}
     </div>
   );
 }
 
-export function BotError({ item, color }: { item: BotItem; color: string }) {
+export function BotError({ item, color, onRelogin }: { item: BotItem; color: string; onRelogin?: () => void }) {
+  const login = (item.error ?? "").includes("login_required");
   return (
     <div className="row left">
       <div className="bubble bot-error" title={absolute(item.ts)}>
         <BotHead bot={item.bot} color={color} />
         <div>{item.error || "응답 실패"}</div>
+        {login && onRelogin && (
+          <button className="btn small" onClick={onRelogin}>
+            재로그인
+          </button>
+        )}
       </div>
     </div>
   );
@@ -103,7 +133,7 @@ export function BotPending({ item, color }: { item: PendingItem; color: string }
   const now = useNow();
   return (
     <div className="row left">
-      <div className="bubble pending" style={{ borderColor: color }} title={absolute(item.ts)}>
+      <div className="bubble pending" style={{ borderColor: color }} title={absolute(item.ts)} aria-live="polite">
         <BotHead bot={item.bot} color={color} extra={elapsedSince(item.ts, now)} />
         <div className="muted">
           {item.queuePosition > 0 ? `대기 ${item.queuePosition}번째` : "응답 중"}
@@ -114,14 +144,32 @@ export function BotPending({ item, color }: { item: PendingItem; color: string }
   );
 }
 
-export function Final({ item }: { item: FinalItem }) {
+interface FinalProps {
+  item: FinalItem;
+  /** 세션의 마지막 정리인지. 지난 확정 질문에는 버튼을 붙이지 않는다. 기본 true */
+  latest?: boolean;
+  onSend?: (text: string) => void;
+}
+
+export function Final({ item, latest = true, onSend }: FinalProps) {
+  const confirm = latest && !!onSend && isConfirmQuestion(item.text);
   return (
     <div className="row left">
-      <div className="bubble final" title={absolute(item.ts)}>
+      <div className="bubble final" title={absolute(item.ts)} aria-live="assertive">
         <div className="bubble-head">Claude 정리</div>
         <div className="markdown">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
         </div>
+        {confirm && (
+          <div className="final-actions" data-testid="final-actions">
+            <button className="btn primary small" onClick={() => onSend?.(CONFIRM_TEXT)}>
+              진행
+            </button>
+            <button className="btn small" onClick={() => onSend?.(CANCEL_TEXT)}>
+              취소
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

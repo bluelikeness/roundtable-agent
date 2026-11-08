@@ -4,11 +4,15 @@ import {
   modelOf,
   notify,
   openSession,
+  openSheet,
+  resetBot,
+  restartClaude,
   sendText,
   setModel,
   stopRun,
   useStore,
 } from "../../store";
+import type { ReactNode } from "react";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { RunHeader } from "./RunHeader";
@@ -30,17 +34,23 @@ async function submit(text: string, sid: string | null): Promise<boolean> {
       else notify("실행 중인 요청이 없습니다");
       return true;
     case "reset":
+      return resetBot(cmd.bot);
     case "restart":
-      // 허브 API 미구현(후속 단계). 텍스트를 Claude 에 보내지 않는다
-      notify(`${cmd.cmd === "reset" ? "/reset" : "/restart"}: 허브 API 미구현`, "warn");
-      return false;
+      return restartClaude();
     case "invalid":
       notify(cmd.message, "warn");
       return false;
   }
 }
 
-export function ChatView() {
+interface ChatViewProps {
+  /** 헤더 왼쪽(모바일: 세션 드로어 버튼) */
+  leading?: ReactNode;
+  /** 헤더 오른쪽(모바일: 봇 상태 점) */
+  trailing?: ReactNode;
+}
+
+export function ChatView({ leading, trailing }: ChatViewProps) {
   const activeId = useStore((s) => s.activeId);
   const chat = useStore((s) => (s.activeId ? s.chats[s.activeId] : undefined)) ?? null;
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeId));
@@ -53,9 +63,23 @@ export function ChatView() {
 
   return (
     <section className="chat">
-      <RunHeader title={title} chat={chat} ws={ws} model={modelOf(activeId)} onStop={stopRun} />
+      <RunHeader
+        title={title}
+        chat={chat}
+        ws={ws}
+        model={modelOf(activeId)}
+        onStop={stopRun}
+        leading={leading}
+        trailing={trailing}
+      />
       {chat && chat.items.length > 0 ? (
-        <MessageList chat={chat} bots={bots} onRetry={(t) => void sendText(t)} />
+        <MessageList
+          chat={chat}
+          bots={bots}
+          onRetry={(t) => void sendText(t)}
+          onSend={(t) => void sendText(t)}
+          onRelogin={(bot) => openSheet({ kind: "login", bot })}
+        />
       ) : (
         <div className="messages empty">
           <p className="muted">무엇을 도와드릴까요? @로 봇을 지정하고 /로 명령을 씁니다.</p>

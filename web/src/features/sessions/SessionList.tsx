@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { SessionOut } from "../../api/types";
 import { shortTime } from "../../lib/time";
 import { archiveSession, deleteSession, openSession, renameSession, useStore } from "../../store";
@@ -92,7 +92,7 @@ function SessionItem({ s, active, running }: { s: SessionOut; active: boolean; r
   );
 }
 
-export function SessionList({ onCollapse }: { onCollapse: () => void }) {
+export function SessionList({ onCollapse, footer }: { onCollapse: () => void; footer?: ReactNode }) {
   const sessions = useStore((s) => s.sessions);
   const activeId = useStore((s) => s.activeId);
   const chats = useStore((s) => s.chats);
@@ -111,6 +111,7 @@ export function SessionList({ onCollapse }: { onCollapse: () => void }) {
           <SessionItem key={s.id} s={s} active={s.id === activeId} running={!!chats[s.id]?.runs.current} />
         ))}
       </ul>
+      {footer}
     </nav>
   );
 }
