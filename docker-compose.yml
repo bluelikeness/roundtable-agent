@@ -1,0 +1,46 @@
+# 멀티봇 허브 (VM 1). 러너·Mock 어댑터는 P1-2·P1-3 에서 추가한다.
+# 로컬 개발용 포트 노출은 docker-compose.override.yml 에 있다.
+name: multibot
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-multibot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env 에 POSTGRES_PASSWORD 가 필요합니다}
+      POSTGRES_DB: ${POSTGRES_DB:-multibot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  hub-api:
+    build: ./hub
+    environment:
+      HUB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-multibot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-multibot}
+      HUB_SECRET_KEY: ${HUB_SECRET_KEY:?.env 에 HUB_SECRET_KEY 가 필요합니다}
+      HUB_COOKIE_SECURE: ${HUB_COOKIE_SECURE:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    # P1-5 전까지는 빈 껍데기: 정적 안내 페이지 + /api 를 허브로 프록시
+    build: ./web
+    depends_on:
+      - hub-api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

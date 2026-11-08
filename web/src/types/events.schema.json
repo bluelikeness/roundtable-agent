@@ -1,0 +1,1067 @@
+{
+  "title": "EventsSchema",
+  "type": "object",
+  "properties": {
+    "HubEvent": {
+      "$ref": "#/$defs/HubEvent"
+    },
+    "ClientMessage": {
+      "$ref": "#/$defs/ClientMessage"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "BotPending": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "bot.pending",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/BotPendingPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "BotPending",
+      "type": "object"
+    },
+    "BotPendingPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "bot": {
+          "type": "string"
+        },
+        "tool_call_id": {
+          "type": "string"
+        },
+        "queue_position": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "bot",
+        "tool_call_id",
+        "queue_position"
+      ],
+      "title": "BotPendingPayload",
+      "type": "object"
+    },
+    "BotReply": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "bot.reply",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/BotReplyPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "BotReply",
+      "type": "object"
+    },
+    "BotReplyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "bot": {
+          "type": "string"
+        },
+        "tool_call_id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "raw": {
+          "type": "string"
+        },
+        "structured": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "needs_input": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latency_ms": {
+          "type": "integer"
+        },
+        "message_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "bot",
+        "tool_call_id",
+        "ok",
+        "raw",
+        "structured",
+        "needs_input",
+        "error",
+        "latency_ms",
+        "message_id"
+      ],
+      "title": "BotReplyPayload",
+      "type": "object"
+    },
+    "BotStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "bot.status",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/BotStatusPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "BotStatus",
+      "type": "object"
+    },
+    "BotStatusPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "bot": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_ok_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queue_depth": {
+          "type": "integer"
+        },
+        "avg_latency_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bot",
+        "available",
+        "reason",
+        "last_ok_at",
+        "queue_depth",
+        "avg_latency_ms",
+        "enabled"
+      ],
+      "title": "BotStatusPayload",
+      "type": "object"
+    },
+    "CancelQueued": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "cancel_queued",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/CancelQueuedPayload"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "title": "CancelQueued",
+      "type": "object"
+    },
+    "CancelQueuedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "CancelQueuedPayload",
+      "type": "object"
+    },
+    "ClaudeFinal": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "claude.final",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ClaudeFinalPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "ClaudeFinal",
+      "type": "object"
+    },
+    "ClaudeFinalPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "message_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_id",
+        "text",
+        "message_id",
+        "usage"
+      ],
+      "title": "ClaudeFinalPayload",
+      "type": "object"
+    },
+    "ClaudeNote": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "claude.note",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ClaudeNotePayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "ClaudeNote",
+      "type": "object"
+    },
+    "ClaudeNotePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "text"
+      ],
+      "title": "ClaudeNotePayload",
+      "type": "object"
+    },
+    "ClientMessage": {
+      "title": "ClientMessage",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Subscribe"
+        },
+        {
+          "$ref": "#/$defs/Send"
+        },
+        {
+          "$ref": "#/$defs/CancelQueued"
+        },
+        {
+          "$ref": "#/$defs/StopRun"
+        }
+      ]
+    },
+    "HubEvent": {
+      "title": "HubEvent",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MessageAck"
+        },
+        {
+          "$ref": "#/$defs/RunStarted"
+        },
+        {
+          "$ref": "#/$defs/ClaudeNote"
+        },
+        {
+          "$ref": "#/$defs/BotPending"
+        },
+        {
+          "$ref": "#/$defs/BotReply"
+        },
+        {
+          "$ref": "#/$defs/ClaudeFinal"
+        },
+        {
+          "$ref": "#/$defs/RunFinished"
+        },
+        {
+          "$ref": "#/$defs/BotStatus"
+        },
+        {
+          "$ref": "#/$defs/SessionSystem"
+        }
+      ]
+    },
+    "MessageAck": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "message.ack",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/MessageAckPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "MessageAck",
+      "type": "object"
+    },
+    "MessageAckPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "run_id",
+        "status"
+      ],
+      "title": "MessageAckPayload",
+      "type": "object"
+    },
+    "RunFinished": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.finished",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunFinishedPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "RunFinished",
+      "type": "object"
+    },
+    "RunFinishedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "done",
+            "failed",
+            "timeout"
+          ],
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "run_id",
+        "status"
+      ],
+      "title": "RunFinishedPayload",
+      "type": "object"
+    },
+    "RunStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.started",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunStartedPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "RunStarted",
+      "type": "object"
+    },
+    "RunStartedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "claude_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_id",
+        "claude_session_id"
+      ],
+      "title": "RunStartedPayload",
+      "type": "object"
+    },
+    "Send": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "send",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/SendPayload"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "title": "Send",
+      "type": "object"
+    },
+    "SendPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "enum": [
+                "sonnet",
+                "opus"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SendPayload",
+      "type": "object"
+    },
+    "SessionSystem": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "session.system",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionSystemPayload"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "ts",
+        "type",
+        "payload"
+      ],
+      "title": "SessionSystem",
+      "type": "object"
+    },
+    "SessionSystemPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SessionSystemPayload",
+      "type": "object"
+    },
+    "StopRun": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "stop_run",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/StopRunPayload"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "title": "StopRun",
+      "type": "object"
+    },
+    "StopRunPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "StopRunPayload",
+      "type": "object"
+    },
+    "Subscribe": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "subscribe",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/SubscribePayload"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "title": "Subscribe",
+      "type": "object"
+    },
+    "SubscribePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "since_seq": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "SubscribePayload",
+      "type": "object"
+    }
+  }
+}

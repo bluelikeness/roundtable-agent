@@ -1,0 +1,285 @@
+/* 자동 생성 파일(make types). 직접 고치지 않는다. 원본: hub/app/events.py */
+
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "HubEvent".
+ */
+export type HubEvent =
+  MessageAck | RunStarted | ClaudeNote | BotPending | BotReply | ClaudeFinal | RunFinished | BotStatus | SessionSystem;
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "ClientMessage".
+ */
+export type ClientMessage = Subscribe | Send | CancelQueued | StopRun;
+
+export interface EventsSchema {
+  HubEvent?: HubEvent;
+  ClientMessage?: ClientMessage;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "MessageAck".
+ */
+export interface MessageAck {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "message.ack";
+  payload: MessageAckPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "MessageAckPayload".
+ */
+export interface MessageAckPayload {
+  message_id: string;
+  run_id: string;
+  status: "queued" | "running";
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "RunStarted".
+ */
+export interface RunStarted {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "run.started";
+  payload: RunStartedPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "RunStartedPayload".
+ */
+export interface RunStartedPayload {
+  run_id: string;
+  claude_session_id: string | null;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "ClaudeNote".
+ */
+export interface ClaudeNote {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "claude.note";
+  payload: ClaudeNotePayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "ClaudeNotePayload".
+ */
+export interface ClaudeNotePayload {
+  run_id: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotPending".
+ */
+export interface BotPending {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "bot.pending";
+  payload: BotPendingPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotPendingPayload".
+ */
+export interface BotPendingPayload {
+  run_id: string;
+  bot: string;
+  tool_call_id: string;
+  queue_position: number;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotReply".
+ */
+export interface BotReply {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "bot.reply";
+  payload: BotReplyPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotReplyPayload".
+ */
+export interface BotReplyPayload {
+  run_id: string;
+  bot: string;
+  tool_call_id: string;
+  ok: boolean;
+  raw: string;
+  structured: {
+    [k: string]: unknown;
+  } | null;
+  needs_input: boolean;
+  error: string | null;
+  latency_ms: number;
+  message_id: string;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "ClaudeFinal".
+ */
+export interface ClaudeFinal {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "claude.final";
+  payload: ClaudeFinalPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "ClaudeFinalPayload".
+ */
+export interface ClaudeFinalPayload {
+  run_id: string;
+  text: string;
+  message_id: string;
+  usage: {
+    [k: string]: unknown;
+  } | null;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "RunFinished".
+ */
+export interface RunFinished {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "run.finished";
+  payload: RunFinishedPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "RunFinishedPayload".
+ */
+export interface RunFinishedPayload {
+  run_id: string;
+  status: "done" | "failed" | "timeout";
+  error?: string | null;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotStatus".
+ */
+export interface BotStatus {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "bot.status";
+  payload: BotStatusPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "BotStatusPayload".
+ */
+export interface BotStatusPayload {
+  bot: string;
+  available: boolean;
+  reason: string | null;
+  last_ok_at: string | null;
+  queue_depth: number;
+  avg_latency_ms: number | null;
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "SessionSystem".
+ */
+export interface SessionSystem {
+  session_id: string | null;
+  seq: number | null;
+  ts: string;
+  type: "session.system";
+  payload: SessionSystemPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "SessionSystemPayload".
+ */
+export interface SessionSystemPayload {
+  text: string;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "Subscribe".
+ */
+export interface Subscribe {
+  session_id?: string | null;
+  seq?: number | null;
+  ts?: string | null;
+  type: "subscribe";
+  payload: SubscribePayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "SubscribePayload".
+ */
+export interface SubscribePayload {
+  session_id: string;
+  since_seq?: number;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "Send".
+ */
+export interface Send {
+  session_id?: string | null;
+  seq?: number | null;
+  ts?: string | null;
+  type: "send";
+  payload: SendPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "SendPayload".
+ */
+export interface SendPayload {
+  text: string;
+  model?: ("sonnet" | "opus") | null;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "CancelQueued".
+ */
+export interface CancelQueued {
+  session_id?: string | null;
+  seq?: number | null;
+  ts?: string | null;
+  type: "cancel_queued";
+  payload: CancelQueuedPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "CancelQueuedPayload".
+ */
+export interface CancelQueuedPayload {
+  run_id: string;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "StopRun".
+ */
+export interface StopRun {
+  session_id?: string | null;
+  seq?: number | null;
+  ts?: string | null;
+  type: "stop_run";
+  payload: StopRunPayload;
+}
+/**
+ * This interface was referenced by `EventsSchema`'s JSON-Schema
+ * via the `definition` "StopRunPayload".
+ */
+export interface StopRunPayload {
+  run_id: string;
+}
