@@ -118,6 +118,8 @@ def _targets() -> list[Target]:
     names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c").split(",") if n.strip()]
     out = []
     for n in names:
+        if n not in KNOWN:
+            raise ValueError(f"CONTRACT_TARGETS 에 모르는 대상 {n!r}. 가능한 값: {', '.join(KNOWN)}")
         mcp_port, admin_port = KNOWN[n]
         out.append(
             Target(

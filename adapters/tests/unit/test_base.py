@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 
 import pytest
@@ -118,6 +119,8 @@ async def test_queue_wait_exceeded_sets_cooldown(tmp_path):
     st = await a.status()
     assert st.reason == "cooldown" and st.available is False
     first.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await first
 
 
 class ProgressAdapter(BotAdapter):
@@ -140,7 +143,7 @@ class ProgressAdapter(BotAdapter):
     async def _collect(self, thread: Thread, deadline: float):
         dt = time.monotonic() - self.t_send
         out = [RawMessage(id="p", text="찾는 중…")]
-        if dt > 6:  # 1회차 대기(잔여의 절반 ≈ 5초)를 넘겨서 답한다
+        if dt > 0.7:  # 1회차 대기(잔여의 절반 ≈ 0.5초)를 넘겨서 답한다
             out.append(RawMessage(id="r", text="찾았습니다"))
         return out
 
@@ -151,10 +154,12 @@ class ProgressAdapter(BotAdapter):
         return CodeLogin(hint="", submit=None)
 
 
-async def test_progress_messages_are_ignored_and_not_retried(tmp_path):
+async def test_progress_messages_are_ignored_and_not_retried(tmp_path, monkeypatch):
+    # 계약상 timeout_s 하한은 10초지만 단위 테스트는 시간을 줄여 같은 동작을 본다
+    monkeypatch.setattr("adapters.base.TIMEOUT_MIN", 1)
     a = ProgressAdapter(AdapterConfig(name="p", description="d", timeouts={"quiet_s": 0.1}), tmp_path)
     a.poll_s = 0.05
-    r = await a.ask("찾아줘", "t", timeout_s=10)
+    r = await a.ask("찾아줘", "t", timeout_s=1)
     assert r.ok, r
     assert r.raw == "찾았습니다"
     assert a.sends == 1
@@ -170,3 +175,20 @@ async def test_threads_persist(tmp_path):
     assert b.threads["keep"].last_action_ids == ["btn_1"]
     r = await b.ask("[tap:btn_1]", "keep")
     assert r.ok and "예약" in r.raw
+
+
+async def test_stuck_extract_is_bounded_by_timeout(mock, monkeypatch):
+    """_extract 가 멈춰도 timeout_s 안에 error=timeout 으로 끝나고 락을 놓는다."""
+    monkeypatch.setattr("adapters.base.TIMEOUT_MIN", 1)
+
+    async def stuck(msgs):
+        await asyncio.sleep(60)
+
+    orig = mock._extract
+    mock._extract = stuck
+    t0 = time.monotonic()
+    r = await mock.ask("[mock:ok] 멈춤", "t1", timeout_s=1)
+    assert r.ok is False and r.error == "timeout"
+    assert time.monotonic() - t0 < 1.5
+    mock._extract = orig
+    assert (await mock.ask("[mock:ok] 다음", "t1")).ok

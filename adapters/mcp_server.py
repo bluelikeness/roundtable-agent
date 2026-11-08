@@ -1,7 +1,8 @@
 """ask·status 두 툴만 여는 MCP 서버 (03 2장). streamable HTTP, 무상태.
 
 무상태(stateless)로 여는 이유: 어댑터가 재시작해도 Claude Code 쪽 MCP 세션이 끊기지 않는다.
-툴 호출은 어떤 경우에도 is_error=False 의 정상 결과다. 오류는 AskResult.error 필드.
+ask·status 호출은 어떤 경우에도 is_error=False 의 정상 결과다. 오류는 AskResult.error 필드.
+목록에 없는 툴 이름만 is_error=True 로 돌려준다(MCP 예외는 아니다).
 """
 
 from __future__ import annotations

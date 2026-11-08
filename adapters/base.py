@@ -404,7 +404,12 @@ class BotAdapter(ABC):
             self._waiting -= 1
 
         try:
-            return await self._run(text, thread_id, reset, t0, deadline, record)
+            # 훅(_extract·_is_typing·_on_reset 등)이 멈춰도 timeout_s 를 넘기지 않고 큐 락을 놓는다
+            async with asyncio.timeout(max(0.0, deadline - time.monotonic())):
+                return await self._run(text, thread_id, reset, t0, deadline, record)
+        except TimeoutError:
+            record.setdefault("detail", "ask 전체 시간 초과")
+            return self._fail("timeout", t0)
         finally:
             if acquired:
                 self._lock.release()
