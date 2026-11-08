@@ -18,6 +18,7 @@ RUN uv sync --frozen --no-dev
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY bots.yaml ./bots.yaml
 
 EXPOSE 8000
 # 기동 시 마이그레이션을 최신으로 올린 뒤 API 를 띄운다

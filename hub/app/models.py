@@ -72,6 +72,9 @@ class ChatSession(Base):
     created_at: Mapped[datetime] = _ts()
     last_message_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    # 설계 표에 없는 컬럼: WebSocket 이벤트 seq 의 세션별 카운터(05 6장). message 가 없는 이벤트
+    # (run.started·bot.pending 등)도 seq 를 쓰므로 message.seq 최대값으로는 이어 붙일 수 없다.
+    last_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0", default=0)
 
 
 class Message(Base):
@@ -107,6 +110,9 @@ class Run(Base):
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     error: Mapped[str | None] = mapped_column(Text)
+    # 설계 표에 없는 컬럼: 이 run 이 쓴 Claude Code 세션. 세션 분할(04 9장)의
+    # "현재 Claude 세션 누적 tool_call 20건" 을 세는 데 쓴다.
+    claude_session_id: Mapped[str | None] = mapped_column(String(128))
 
 
 class ToolCall(Base):

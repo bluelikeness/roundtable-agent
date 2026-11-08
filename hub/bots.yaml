@@ -1,0 +1,15 @@
+# 봇 등록 (docs/03-adapters.md 10장). 봇 추가 = 한 줄. 허브가 실행마다 다시 읽는다.
+# name 은 MCP 서버 이름(툴 이름 mcp__<name>__ask). 소문자·숫자·하이픈.
+bots:
+  - name: mock-a
+    mcp_url: http://mock-a:9000/mcp
+    admin_url: http://mock-a:9100
+    aliases: [목에이]
+  - name: mock-b
+    mcp_url: http://mock-b:9000/mcp
+    admin_url: http://mock-b:9100
+    aliases: [목비]
+  - name: mock-c
+    mcp_url: http://mock-c:9000/mcp
+    admin_url: http://mock-c:9100
+    aliases: [목씨]
