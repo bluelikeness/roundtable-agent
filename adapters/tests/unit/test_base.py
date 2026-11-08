@@ -192,3 +192,35 @@ async def test_stuck_extract_is_bounded_by_timeout(mock, monkeypatch):
     assert time.monotonic() - t0 < 1.5
     mock._extract = orig
     assert (await mock.ask("[mock:ok] 다음", "t1")).ok
+
+
+async def _scripted(tmp_path, **mock_over):
+    base = {"latency_s": {"min": 0.05, "max": 0.05}, "replies": {"식당": "한옥집 19:00 가능"}}
+    base.update(mock_over)
+    a = MockAdapter(cfg(mock=base), tmp_path)
+    a.poll_s = 0.02
+    await a._on_start()
+    return a
+
+
+async def test_scripted_ask_back_once_per_thread(tmp_path):
+    # 평가용: 스레드마다 처음 한 번만 되묻고 이후에는 일반 응답
+    a = await _scripted(tmp_path, ask_back={"text": "몇 명이세요?", "times": 1})
+    r = await a.ask("강남 식당", "t1")
+    assert r.ok and r.needs_input and r.raw == "몇 명이세요?"
+    r = await a.ask("2명", "t1")
+    assert r.ok and r.raw == "echo: 2명"
+    r = await a.ask("식당", "t2")
+    assert r.raw == "몇 명이세요?"
+
+
+async def test_scripted_confirm_and_tap(tmp_path):
+    a = await _scripted(
+        tmp_path,
+        confirm={"text": "한옥집 19:00 2명 예약금 20,000원. 진행할까요?", "summary": "한옥집 19:00 2명 20,000원",
+                 "action_id": "btn_confirm_1", "done_text": "예약 완료"},
+    )
+    r = await a.ask("한옥집 예약", "t1")
+    assert r.structured["confirmation_required"] == {"summary": "한옥집 19:00 2명 20,000원", "action_id": "btn_confirm_1"}
+    r = await a.ask("[tap:btn_confirm_1]", "t1")
+    assert r.ok and r.raw == "예약 완료" and "confirmation_required" not in r.structured

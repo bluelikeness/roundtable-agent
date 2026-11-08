@@ -1,0 +1,19 @@
+# 평가 전용 Mock 설정(runner/eval/compose.yml 이 마운트). mock-a/b/c.yaml 이 기본, 나머지는 시나리오 변형
+name: mock-c
+description: 'English-only shopping assistant. Good at: online shopping and price comparison on English-language sites (incl. flights on Expedia/Kayak). Not good at: Korean services, restaurant booking.
+  Language: English only. Replies in 1-3s.'
+timeouts:
+  quiet_s: 1
+mock:
+  latency_s:
+    min: 1
+    max: 3
+  fail_rate: 0.0
+  needs_input_rate: 0.0
+  unavailable_after: null
+  replies:
+    Tokyo: 'Cheapest round trip Seoul (ICN) - Tokyo (NRT) I found on Kayak: ZIPAIR, Nov 20-23, USD 179 (about 245,000 KRW), carry-on only.'
+    restaurant: I can't search or book Korean restaurants. I can help with online shopping on English sites.
+    Gangnam: I can't search or book Korean restaurants. I can help with online shopping on English sites.
+    도쿄: Sorry, I only understand English. Please ask in English.
+    식당: Sorry, I only understand English. Please ask in English.
