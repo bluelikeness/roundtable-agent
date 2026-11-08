@@ -79,9 +79,8 @@ class Message(Base):
     __table_args__ = (UniqueConstraint("session_id", "seq", name="uq_message_session_seq"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("session.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    # session_id 조회는 uq_message_session_seq (session_id, seq) 인덱스가 맡으므로 단독 인덱스를 두지 않는다
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[MessageRole] = mapped_column(Enum(MessageRole, name="message_role"), nullable=False)
     bot_name: Mapped[str | None] = mapped_column(String(64))
     raw: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -159,4 +158,6 @@ class Operator(Base):
     locked_until: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
     # 비밀번호·TOTP 재설정 시 올려서 기존 로그인 쿠키를 무효화한다.
     auth_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
+    # 마지막으로 받아 준 TOTP 시간 단계. 같은 코드의 재사용을 막는다
+    last_totp_step: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = _ts()

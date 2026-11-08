@@ -1,23 +1,24 @@
 """허브 테스트 공통. 실제 PostgreSQL(테스트 전용 DB)에 마이그레이션을 올려 쓴다.
 
-DB 주소는 HUB_TEST_DATABASE_URL (make test-hub 가 .env 로 채운다).
+DB 주소는 HUB_TEST_DATABASE_URL, 없으면 레포 루트 .env 의 postgres 계정으로 만든다.
 """
 
 import os
+from pathlib import Path
 
-TEST_DB_URL = os.environ.get("HUB_TEST_DATABASE_URL")
-if not TEST_DB_URL:
-    raise RuntimeError("HUB_TEST_DATABASE_URL 이 필요합니다. `make test-hub` 로 실행하세요.")
+from tests.envfile import build_test_db_url
+
+TEST_DB_URL = os.environ.get("HUB_TEST_DATABASE_URL") or build_test_db_url(
+    Path(__file__).resolve().parents[2] / ".env"
+)
 if not TEST_DB_URL.rstrip("/").endswith("_test"):
     # 실수로 개발 DB 를 비우지 않도록 막는다
     raise RuntimeError("테스트 DB 이름은 _test 로 끝나야 합니다")
 
 # app 을 import 하기 전에 설정을 테스트용으로 고정한다
 os.environ["HUB_DATABASE_URL"] = TEST_DB_URL
-os.environ["HUB_SECRET_KEY"] = "test-secret-key"
+os.environ["HUB_SECRET_KEY"] = "test-secret-key-0123456789abcdefghijklmnop"
 os.environ["HUB_COOKIE_SECURE"] = "false"
-
-from pathlib import Path  # noqa: E402
 
 import httpx  # noqa: E402
 import pyotp  # noqa: E402

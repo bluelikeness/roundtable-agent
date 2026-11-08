@@ -109,3 +109,57 @@ async def test_secure_cookie_flag(client, operator, monkeypatch):
     finally:
         monkeypatch.setenv("HUB_COOKIE_SECURE", "false")
         get_settings.cache_clear()
+
+
+async def test_concurrent_failures_still_lock(operator):
+    """동시 실패 요청도 실패 횟수를 덮어쓰지 않고 모두 센다(FOR UPDATE)."""
+    import asyncio
+
+    import httpx
+
+    from app.main import app
+
+    _, secret = operator
+
+    async def bad_login():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://hub.test") as c:
+            return (await _login(c, password="wrong", totp=totp_now(secret))).status_code
+
+    assert await asyncio.gather(*(bad_login() for _ in range(5))) == [401] * 5
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://hub.test") as c:
+        assert (await _login(c, totp=totp_now(secret))).status_code == 423
+
+
+async def test_locked_account_hidden_from_wrong_credentials(client, operator):
+    """잠금 상태는 맞는 비밀번호·TOTP 로만 드러난다. 틀린 값에는 없는 아이디와 같은 401."""
+    _, secret = operator
+    for _ in range(5):
+        await _login(client, password="wrong", totp=totp_now(secret))
+    r = await _login(client, password="wrong", totp=totp_now(secret))
+    assert r.status_code == 401 and r.json()["detail"] == "invalid_credentials"
+
+
+async def test_totp_code_cannot_be_reused(client, operator):
+    _, secret = operator
+    code = totp_now(secret)
+    assert (await _login(client, totp=code)).status_code == 200
+    r = await _login(client, totp=code)
+    assert r.status_code == 401 and r.json()["detail"] == "invalid_credentials"
+
+
+async def test_logout_revokes_copied_cookie(authed):
+    stolen = authed.cookies.get("mb_session")
+    assert (await authed.post("/api/auth/logout")).status_code == 204
+    authed.cookies.set("mb_session", stolen)
+    assert (await authed.get("/api/auth/me")).status_code == 401
+
+
+def test_weak_secret_rejected():
+    import pytest
+
+    from app.config import DEV_SECRET, Settings
+
+    for weak in (DEV_SECRET, "short-key"):
+        with pytest.raises(RuntimeError):
+            Settings(secret_key=weak).require_strong_secret()
+    Settings(secret_key="x" * 32).require_strong_secret()

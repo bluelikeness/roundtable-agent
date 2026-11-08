@@ -35,6 +35,7 @@ def upgrade() -> None:
     sa.Column('failed_attempts', sa.Integer(), server_default='0', nullable=False),
     sa.Column('locked_until', sa.DateTime(timezone=True), nullable=True),
     sa.Column('auth_version', sa.Integer(), server_default='1', nullable=False),
+    sa.Column('last_totp_step', sa.BigInteger(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_operator')),
     sa.UniqueConstraint('username', name=op.f('uq_operator_username'))
@@ -68,7 +69,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('pk_message')),
     sa.UniqueConstraint('session_id', 'seq', name='uq_message_session_seq')
     )
-    op.create_index(op.f('ix_message_session_id'), 'message', ['session_id'], unique=False)
     op.create_table('run',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('session_id', sa.UUID(), nullable=False),
@@ -107,7 +107,6 @@ def downgrade() -> None:
     op.drop_table('tool_call')
     op.drop_index(op.f('ix_run_session_id'), table_name='run')
     op.drop_table('run')
-    op.drop_index(op.f('ix_message_session_id'), table_name='message')
     op.drop_table('message')
     op.drop_table('bot_thread')
     op.drop_table('session')

@@ -2,11 +2,19 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import LoginError, authenticate, clear_cookie, current_operator, issue_cookie
+from app.auth import (
+    LoginError,
+    authenticate,
+    clear_cookie,
+    current_operator,
+    issue_cookie,
+    read_cookie,
+    revoke_sessions,
+)
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import ChatSession, Message, Operator
@@ -34,7 +42,17 @@ async def login(
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response, settings: Settings = Depends(get_settings)) -> None:
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    # 쿠키를 지우는 것만으로는 복사된 토큰이 남으므로 서버에서도 무효화한다.
+    # 서버 쪽 세션 표가 없어 운영자의 모든 기기가 함께 로그아웃된다(운영자 1명이라 허용).
+    data = read_cookie(request, settings)
+    if data is not None and isinstance(data.get("op"), int):
+        await revoke_sessions(db, data["op"])
     clear_cookie(response, settings)
 
 

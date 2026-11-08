@@ -6,7 +6,7 @@ session_id 와 seq 가 null 이다. 이 모듈이 `make types` 로 web 의 TS �
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -202,15 +202,13 @@ class StopRun(_ClientEnvelope):
 
 ClientMessage = Annotated[Subscribe | Send | CancelQueued | StopRun, Field(discriminator="type")]
 
-SERVER_EVENT_TYPES = (
-    "message.ack",
-    "run.started",
-    "claude.note",
-    "bot.pending",
-    "bot.reply",
-    "claude.final",
-    "run.finished",
-    "bot.status",
-    "session.system",
-)
-CLIENT_MESSAGE_TYPES = ("subscribe", "send", "cancel_queued", "stop_run")
+
+
+def _type_literals(union) -> tuple[str, ...]:
+    """Annotated[A | B | ..., Field(...)] 에서 각 모델의 type 리터럴 값을 뽑는다."""
+    return tuple(get_args(m.model_fields["type"].annotation)[0] for m in get_args(get_args(union)[0]))
+
+
+# 유니온에서 계산한다. 목록이 05-ui 6장과 맞는지는 tests/test_events.py 가 확인한다
+SERVER_EVENT_TYPES = _type_literals(HubEvent)
+CLIENT_MESSAGE_TYPES = _type_literals(ClientMessage)

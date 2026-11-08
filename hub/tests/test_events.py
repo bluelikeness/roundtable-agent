@@ -1,7 +1,6 @@
 """WebSocket 이벤트 모델이 docs/05-ui.md 6장의 봉투·type 목록과 일치하는지."""
 
 import uuid
-from typing import get_args
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -33,16 +32,17 @@ PAYLOADS = {
 }
 
 
-def _union_types(tp) -> set[str]:
-    members = get_args(get_args(tp)[0])
-    return {get_args(m.model_fields["type"].annotation)[0] for m in members}
+DESIGN_SERVER_TYPES = {  # docs/05-ui.md 6장 서버 → 클라이언트 표
+    "message.ack", "run.started", "claude.note", "bot.pending", "bot.reply",
+    "claude.final", "run.finished", "bot.status", "session.system",
+}
+DESIGN_CLIENT_TYPES = {"subscribe", "send", "cancel_queued", "stop_run"}
 
 
 def test_type_lists_match_design():
-    assert _union_types(HubEvent) == set(SERVER_EVENT_TYPES) == set(PAYLOADS)
-    assert _union_types(ClientMessage) == set(CLIENT_MESSAGE_TYPES) == {
-        "subscribe", "send", "cancel_queued", "stop_run"
-    }
+    assert set(SERVER_EVENT_TYPES) == DESIGN_SERVER_TYPES == set(PAYLOADS)
+    assert len(SERVER_EVENT_TYPES) == len(DESIGN_SERVER_TYPES)
+    assert set(CLIENT_MESSAGE_TYPES) == DESIGN_CLIENT_TYPES
 
 
 @pytest.mark.parametrize("etype", SERVER_EVENT_TYPES)
