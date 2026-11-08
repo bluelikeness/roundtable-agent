@@ -1,0 +1,146 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`chat reducer > T3 팬아웃: 대기 말풍선 자리에 원문이 들어오고 헤더 카운터가 오른다 > B 먼저 도착 1`] = `
+{
+  "header": {
+    "asked": 3,
+    "kind": "running",
+    "queued": 0,
+    "replied": 1,
+  },
+  "items": [
+    "1 user: 셋 다한테 도쿄 왕복 최저가",
+    "3 note: 세 봇에 물어봅니다",
+    "4 pending mock-a q=0",
+    "7@5 bot mock-b ok=true: B: 32만원",
+    "6 pending mock-c q=1",
+  ],
+  "lastEventSeq": 7,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > T3 팬아웃: 대기 말풍선 자리에 원문이 들어오고 헤더 카운터가 오른다 > 대기 3개 1`] = `
+{
+  "header": {
+    "asked": 3,
+    "kind": "running",
+    "queued": 0,
+    "replied": 0,
+  },
+  "items": [
+    "1 user: 셋 다한테 도쿄 왕복 최저가",
+    "3 note: 세 봇에 물어봅니다",
+    "4 pending mock-a q=0",
+    "5 pending mock-b q=0",
+    "6 pending mock-c q=1",
+  ],
+  "lastEventSeq": 6,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > T3 팬아웃: 대기 말풍선 자리에 원문이 들어오고 헤더 카운터가 오른다 > 완료 1`] = `
+{
+  "header": {
+    "kind": "done",
+  },
+  "items": [
+    "1 user: 셋 다한테 도쿄 왕복 최저가",
+    "3 note: 세 봇에 물어봅니다",
+    "8@4 bot mock-a ok=true: A: 35만원",
+    "7@5 bot mock-b ok=true: B: 32만원",
+    "9@6 bot mock-c ok=false error=unavailable: ",
+    "10 final: | 봇 | 가격 |
+|---|---|
+| B | 32만 |",
+  ],
+  "lastEventSeq": 11,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > T7 needs_input: 봇 질문이 표시되고 실행이 끝난다 1`] = `
+{
+  "header": {
+    "kind": "done",
+  },
+  "items": [
+    "4@3 bot mock-a ok=true: 예산은?",
+    "5 final: mock-a가 예산을 묻습니다.",
+  ],
+  "lastEventSeq": 6,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > 대기열·실패·취소 > 시간 초과 + 대기 취소 1`] = `
+{
+  "header": {
+    "kind": "failed",
+    "status": "failed",
+  },
+  "items": [
+    "1 user: 첫째",
+    "2 user: 둘째",
+    "4 failed timeout timeout",
+    "5 failed failed cancelled",
+  ],
+  "lastEventSeq": 5,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > 대기열·실패·취소 > 실행 1 + 대기 1 1`] = `
+{
+  "header": {
+    "asked": 0,
+    "kind": "running",
+    "queued": 1,
+    "replied": 0,
+  },
+  "items": [
+    "1 user: 첫째",
+    "2 user: 둘째",
+  ],
+  "lastEventSeq": 2,
+  "queued": [
+    "aaaaaaaa-0000-0000-0000-000000000002",
+  ],
+}
+`;
+
+exports[`chat reducer > 새로고침: REST 메시지 + 버퍼 재생(since_seq=0)이 라이브와 같은 화면을 만든다 1`] = `
+{
+  "header": {
+    "asked": 2,
+    "kind": "running",
+    "queued": 0,
+    "replied": 1,
+  },
+  "items": [
+    "1 user: 질문",
+    "3 pending mock-a q=0",
+    "5@4 bot mock-b ok=true: B 원문",
+  ],
+  "lastEventSeq": 5,
+  "queued": [],
+}
+`;
+
+exports[`chat reducer > 허브 재시작 뒤(버퍼 없음): REST 만으로 그린다. 실패 응답은 원문이 비어 있다 1`] = `
+{
+  "header": {
+    "kind": "idle",
+  },
+  "items": [
+    "1 user: 질문",
+    "3 note: 노트",
+    "5@5 bot mock-a ok=false error=응답 실패: ",
+    "6 final: 정리",
+    "7 system: 새 Claude 세션으로 이어집니다",
+  ],
+  "lastEventSeq": 0,
+  "queued": [],
+}
+`;

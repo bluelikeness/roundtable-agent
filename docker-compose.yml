@@ -71,7 +71,7 @@ services:
     restart: unless-stopped
 
   web:
-    # P1-5 전까지는 빈 껍데기: 정적 안내 페이지 + /api 를 허브로 프록시
+    # 웹 UI(Vite 빌드) + /api·/ws 를 허브로 프록시
     build: ./web
     depends_on:
       - hub-api

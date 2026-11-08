@@ -15,10 +15,11 @@ from app.auth import (
     read_cookie,
     revoke_sessions,
 )
+from app.bots import load_bots
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import ChatSession, Message, Operator
-from app.schemas import LoginIn, MessageOut, OperatorOut, SessionCreate, SessionOut, SessionUpdate
+from app.schemas import BotOut, LoginIn, MessageOut, OperatorOut, SessionCreate, SessionOut, SessionUpdate
 
 router = APIRouter(prefix="/api")
 
@@ -140,3 +141,12 @@ async def list_messages(
         .order_by(Message.seq)
     )
     return list((await db.execute(q)).scalars())
+
+
+# --- 봇 ---
+
+
+@router.get("/bots", response_model=list[BotOut], dependencies=authed)
+async def list_bots(settings: Settings = Depends(get_settings)) -> list[BotOut]:
+    # bots.yaml 순서 그대로(봇 색 팔레트 순서). 실행 때와 같이 요청마다 다시 읽는다
+    return [BotOut(name=b.name, aliases=b.aliases, color=b.color) for b in load_bots(settings.bots_file)]
