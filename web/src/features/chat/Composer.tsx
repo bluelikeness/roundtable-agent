@@ -1,0 +1,164 @@
+/**
+ * 입력창 (docs/05-ui.md 5장): Enter 전송, Shift+Enter 줄바꿈, @봇 자동완성, / 명령 자동완성.
+ * @봇 은 텍스트일 뿐이고 해석은 Claude 가 한다.
+ */
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { BotInfo } from "../../api/types";
+import { COMMANDS } from "../../lib/commands";
+
+interface Suggestion {
+  label: string;
+  hint: string;
+  /** 고르면 [start, caret) 구간을 이 문자열로 바꾼다 */
+  insert: string;
+}
+
+interface Props {
+  bots: BotInfo[];
+  disabled?: boolean;
+  onSubmit: (text: string) => Promise<boolean>;
+}
+
+interface Trigger {
+  start: number;
+  items: Suggestion[];
+}
+
+export function findTrigger(text: string, caret: number, bots: BotInfo[]): Trigger | null {
+  const before = text.slice(0, caret);
+  // 명령: 맨 앞 "/단어" 를 치는 중
+  const cmd = /^\/[a-z]*$/.exec(before);
+  if (cmd) {
+    const items = COMMANDS.filter((c) => c.name.startsWith(before)).map((c) => ({
+      label: c.args ? `${c.name} ${c.args}` : c.name,
+      hint: c.help,
+      insert: c.args ? `${c.name} ` : c.name,
+    }));
+    return items.length ? { start: 0, items } : null;
+  }
+  // 봇: 공백 뒤(또는 맨 앞) "@글자" 를 치는 중
+  const at = /(^|\s)@([^\s@]*)$/.exec(before);
+  if (at) {
+    const q = at[2].toLowerCase();
+    const items = bots
+      .filter((b) => b.name.toLowerCase().startsWith(q) || b.aliases.some((a) => a.toLowerCase().startsWith(q)))
+      // 별칭으로 찾아도 정식 이름을 넣는다(Claude 가 툴 이름과 바로 맞춘다)
+      .map((b) => ({ label: `@${b.name}`, hint: b.aliases.join(", "), insert: `@${b.name} ` }));
+    return items.length ? { start: before.length - at[2].length - 1, items } : null;
+  }
+  return null;
+}
+
+export function Composer({ bots, disabled, onSubmit }: Props) {
+  const [text, setText] = useState("");
+  const [caret, setCaret] = useState(0);
+  const [active, setActive] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const trigger = useMemo(() => {
+    const t = findTrigger(text, caret, bots);
+    return t && dismissed !== text ? t : null;
+  }, [text, caret, bots, dismissed]);
+
+  const pick = (s: Suggestion) => {
+    if (!trigger) return;
+    const next = text.slice(0, trigger.start) + s.insert + text.slice(caret);
+    const pos = trigger.start + s.insert.length;
+    setText(next);
+    setCaret(pos);
+    setActive(0);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const submit = async () => {
+    if (busy || !text.trim()) return;
+    setBusy(true);
+    try {
+      if (await onSubmit(text)) {
+        setText("");
+        setCaret(0);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글 조합 중 Enter 는 글자 확정이다
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (trigger) {
+      const n = trigger.items.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive((active + 1) % n);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive((active - 1 + n) % n);
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        pick(trigger.items[Math.min(active, n - 1)]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissed(text);
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void submit();
+    }
+  };
+
+  return (
+    <div className="composer">
+      {trigger && (
+        <ul className="suggest" role="listbox" data-testid="suggest">
+          {trigger.items.map((s, i) => (
+            <li
+              key={s.label}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? "active" : ""}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(s);
+              }}
+            >
+              <span>{s.label}</span>
+              <span className="muted">{s.hint}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <textarea
+        ref={ref}
+        value={text}
+        rows={2}
+        placeholder="메시지 (Enter 전송, Shift+Enter 줄바꿈, @봇, /명령)"
+        disabled={disabled}
+        onChange={(e) => {
+          setText(e.target.value);
+          setCaret(e.target.selectionStart);
+          setActive(0);
+        }}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+        onKeyDown={onKeyDown}
+        aria-label="메시지 입력"
+      />
+      <button className="btn primary" onClick={() => void submit()} disabled={disabled || busy || !text.trim()}>
+        전송
+      </button>
+    </div>
+  );
+}

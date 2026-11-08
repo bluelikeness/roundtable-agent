@@ -10,7 +10,7 @@ JSON2TS := pnpm dlx json-schema-to-typescript@15.0.4
 COMPOSE_EVAL := $(COMPOSE) -p multibot-eval -f runner/eval/compose.yml
 EVAL_TOKEN := runner/eval/out/token
 
-.PHONY: up down logs ps test test-hub test-runner test-adapters eval types admin runner-login
+.PHONY: up down logs ps test test-hub test-runner test-adapters test-web eval types admin runner-login
 
 up:  ## 로컬 스택 기동 (postgres, hub-api, runner, web, mock-a/b/c)
 	$(COMPOSE) up -d --build --wait
@@ -24,7 +24,7 @@ logs:
 ps:
 	$(COMPOSE) ps
 
-test: test-hub test-runner test-adapters  ## hub·runner·adapters·web 전부 (web 은 P1-5 에서 추가)
+test: test-hub test-runner test-adapters test-web  ## hub·runner·adapters·web 전부
 
 test-hub:  ## 허브 단위 테스트. 로컬 postgres(5433)의 multibot_test DB 를 쓴다(.env 의 계정)
 	$(COMPOSE) up -d --wait postgres
@@ -40,6 +40,10 @@ test-adapters:  ## 어댑터 단위 테스트 + Mock 3개 계약 테스트(docs/
 	$(COMPOSE_CONTRACT) up -d --build --wait webhook-sink mock-a mock-b mock-c
 	cd adapters && uv run pytest -q tests/contract -n 3 --dist loadgroup
 	@echo "adapter tests done"
+
+test-web:  ## 웹 타입 검사 + 스토어 리듀서 스냅샷·말풍선·입력창 테스트(vitest)
+	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm test
+	@echo "web tests done"
 
 eval:  ## T1~T14 평가: 실제 claude -p 를 Mock 으로 각 5회. 러너 로그인 필요(make runner-login). 예: make eval ARGS="--cases T3,T10 --n 1"
 	@test -s $(EVAL_TOKEN) || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > $(EVAL_TOKEN)
