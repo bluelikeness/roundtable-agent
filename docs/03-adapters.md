@@ -97,19 +97,19 @@
 
 ## 4. ask 생명주기
 
-&#91;embedded content: ask 생명주기 · 5상태\]
+> 그림: ask 생명주기 · 5상태 (원본은 claude.ai 문서에만 있음)
 
 | 상태 | 하는 일 | 시간 제한 |
 | --- | --- | --- |
-| queued | 어댑터 큐에서 차례 대기. `status.queue_depth`에 반영 | `timeout_s`에 포함. 큐에서만 60초 넘으면 `error=cooldown`으로 실패 |
+| queued | 어댑터 큐에서 차례 대기. `status.queue_depth`에 반영 | `timeout_s`에 포함. 큐에서만 60초 넘으면 `error=rate_limited`로 실패(`status.reason`은 `cooldown`) |
 | sending | `_send` 훅 실행. 로그인 상태 확인 포함 | 15초 |
-| waiting | `_wait_reply` 훅. 봇 메시지가 멈출 때까지 수집 | `timeout_s` 잔여분 |
+| waiting | `_collect` 훅. 봇 메시지가 멈출 때까지 수집 | `timeout_s` 잔여분 (재시도 포함) |
 | done | `AskResult(ok=true)` 반환. `needs_input` 판정 | — |
 | failed | `AskResult(ok=false, error=...)` 반환 | — |
 
-**응답 확정 규칙** (`_wait_reply` 공통): 첫 메시지가 온 뒤 `quiet_s`(기본 2.5초) 동안 새 메시지가 없으면 응답이 끝난 것으로 본다. 봇이 "찾는 중…" 같은 진행 메시지를 보내면 봇별 `progress_patterns`에 맞춰 무시하고 계속 기다린다. 타이핑 표시(텔레그램 typing, 웹 스피너)가 있으면 그게 꺼지는 시점을 우선한다.
+**응답 확정 규칙** (`_collect` 공통, 베이스가 적용): 첫 메시지가 온 뒤 `quiet_s`(기본 2.5초) 동안 새 메시지가 없으면 응답이 끝난 것으로 본다. 봇이 "찾는 중…" 같은 진행 메시지를 보내면 봇별 `progress_patterns`에 맞춰 무시하고 계속 기다린다. 타이핑 표시(텔레그램 typing, 웹 스피너)가 있으면 그게 꺼지는 시점을 우선한다.
 
-**재시도**: waiting 타임아웃 1회차는 같은 `text`를 한 번 더 보낸다. 단, `[tap:]`으로 시작하는 버튼 누르기와 `confirmation_required` 단계의 확정 메시지는 재시도하지 않는다. 중복 결제·예약을 막기 위해서다.
+**재시도**: waiting 1회차가 응답 없이 끝나면 같은 `text`를 한 번 더 보낸다. 1회차는 waiting 진입 시점 잔여 시간의 절반까지만 기다리고, 재시도는 나머지 안에서 끝낸다. `ask` 한 번은 큐 대기·재시도를 포함해 절대 `timeout_s`를 넘지 않는다. 단, `[tap:]`으로 시작하는 버튼 누르기와 `confirmation_required` 단계의 확정 메시지는 재시도하지 않는다. 중복 결제·예약을 막기 위해서다.
 
 **needs\_input 판정**: `choices`나 `buttons`가 있거나, 원문 마지막 문장이 물음표로 끝나거나, 봇별 `question_patterns`에 맞으면 true. 오판은 허용한다. Claude Code가 원문을 읽고 최종 판단한다.
 
@@ -128,6 +128,7 @@ MCP와 같은 프로세스가 별도 포트(기본 9100)로 연다. 허브 API �
 | `POST /enable`, `POST /disable` | `{}` | `{"enabled": bool}` | 운영자 토글. disable이면 `status.reason=disabled` |
 | `GET /threads` | — | `[{"thread_id", "last_at", "message_count"}]` | 디버깅·정리용 |
 | `GET /logs?since=` | — | 최근 `ask` 기록 | 허브의 봇 상태 패널 상세 |
+| `GET /images/<id>` | — | 이미지 바이너리 (`Content-Type` 원본 유지) | `structured.images[]`·`cards[].image_url`의 로컬 파일. 허브가 `GET /api/bots/<bot>/images/<id>`로 프록시한다(UI 설계 3장) |
 
 **상태 보고 의무**: 어댑터가 `login_required`·`backend_down`을 감지하면 기다리지 않고 허브의 `POST /internal/bot-status` 웹훅을 호출한다. 폴링 간격보다 빨리 UI에 반영하기 위해서다. 웹훅 실패는 무시한다(다음 폴링이 잡는다).
 
@@ -320,4 +321,4 @@ mock:
 - [ ] 피클 앱이 대화 제목 편집을 지원하는지. 안 되면 대화 생성 순서로 식별
 - [ ] 뮤즈 VPN 경유 로그인이 계정 지역 체크를 통과하는지 (요구사항 미결과 동일)
 - [ ] 피클 `on_demand` 모드의 부팅 지연을 Claude Code 타임아웃 안에 어떻게 넣을지 — `status`가 `booting`을 돌려주고 Claude가 기다리게 할지, 허브가 미리 깨울지
-- [ ] `images[]` 로컬 경로를 UI가 어떻게 받을지 — 허브가 어댑터 스토리지를 프록시하는 엔드포인트 필요 (UI 설계에서)
+- [x] `images[]` 로컬 경로를 UI가 어떻게 받을지 — 5장 `GET /images/<id>` + 허브 프록시로 결정

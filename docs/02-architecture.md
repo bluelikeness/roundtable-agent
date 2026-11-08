@@ -6,7 +6,7 @@
 
 허브는 4계층이다. 웹 UI와 허브 API가 대화와 상태를 관리하고, 러너가 사용자 메시지마다 Claude Code를 헤드리스로 띄우며, Claude Code가 MCP 툴로 노출된 봇 어댑터를 골라 부르고, 어댑터가 각 봇의 실제 채널(텔레그램·웹·에뮬레이터)을 조작한다.
 
-&#91;embedded content: 전체 아키텍처 · 4계층, 어댑터 3개\]
+> 그림: 전체 아키텍처 · 4계층, 어댑터 3개 (원본은 claude.ai 문서에만 있음)
 
 허브 API는 Claude Code를 거치지 않고 어댑터 헬스체크와 재로그인을 직접 호출한다(점선). 봇 응답은 Claude Code가 받아 정리한 뒤 러너의 stream-json을 통해 UI로 흘러간다.
 
@@ -37,13 +37,13 @@
 
 메시지 한 건은 Claude Code 실행 한 번이다. 팬아웃·릴레이·토론의 차이는 그 실행 안에서 Claude Code가 툴을 어떤 순서로 부르느냐뿐이고, 허브와 러너 쪽 코드는 세 경우 모두 같다.
 
-&#91;embedded content: 팬아웃 시퀀스 · 10단계\]
+> 그림: 팬아웃 시퀀스 · 10단계 (원본은 claude.ai 문서에만 있음)
 
 툴 호출(4·5)과 툴 결과(7·8)는 stream-json에 `tool_use`·`tool_result` 이벤트로 실시간으로 나오므로, 러너는 최종 텍스트를 기다리지 않고 각 원문을 도착 즉시 UI로 밀어준다. Claude의 정리 말풍선은 마지막 텍스트 블록이다.
 
 **릴레이와 토론은 4–8만 다르다**
 
-1. 릴레이: `mcp__vooy__ask` → 결과 받음 → 그 결과를 포함한 질문으로 `mcp__muse__ask` → 결과 → 정리. 툴 호출이 순차로 바뀜 뿐 이벤트 형태는 같다.
+1. 릴레이: `mcp__vooy__ask` → 결과 받음 → 그 결과를 포함한 질문으로 `mcp__muse__ask` → 결과 → 정리. 툴 호출이 순차로 바뀔 뿐 이벤트 형태는 같다.
 2. 토론: 릴레이를 라운드 상한(기본 3)까지 반복. 종료 판단은 시스템 프롬프트의 규칙과 `--max-turns`로 이중 제한.
 3. 봇이 되물으면: 어댑터가 `needs_input: true`로 반환 → Claude Code가 세션 맥락으로 답할 수 있으면 다시 `ask`, 없으면 사용자에게 되묻고 실행 종료. 다음 메시지가 `--resume`으로 이어받는다.
 4. 봇 장애: 어댑터가 `error: unavailable`을 반환 → Claude Code는 그 봇을 빼고 정리하며 이유를 밝힌다. 허브는 동시에 헬스체크 상태를 갱신한다.
@@ -58,7 +58,7 @@ claude -p "<사용자 메시지>" \
   --output-format stream-json --verbose \
   --append-system-prompt-file ./orchestrator.md \
   --mcp-config ./mcp.json --strict-mcp-config \
-  --allowedTools "mcp__vooy__ask,mcp__muse__ask,mcp__pickle__ask,mcp__hub__list_bots" \
+  --allowedTools "mcp__vooy__ask,mcp__vooy__status,mcp__muse__ask,mcp__muse__status,..." \  # 가용 봇별로 러너가 생성
   --disallowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
   --max-turns 12 \
   --model sonnet
@@ -69,23 +69,27 @@ claude -p "<사용자 메시지>" \
 | 세션 매핑 | 허브 세션 1 : Claude Code 세션 1, `--resume` | 봇 원문·되물음 맥락을 Claude가 직접 기억. 허브가 맥락을 재조립할 필요 없음 |
 | 세션 수명 | 허브 세션 삭제 시 함께 폐기. 메시지 간 24시간 넘으면 새 세션 + 요약 주입 | Claude Code 세션 파일이 무한히 커지는 것 방지 |
 | 시스템 프롬프트 | `--append-system-prompt-file`로 오케스트레이터 규칙 주입 (별도 문서) | Claude Code 기본 프롬프트는 코딩용이라 역할 재정의 필요 |
-| 툴 제한 | `--strict-mcp-config` + `--allowedTools` 화이트리스트, 파일·셸·웹 툴은 명시적 차단 | 오케스트레이터가 서버 파일을 건드리면 안 됨. 권한 프롬프트가 헤드리스에서 멈추는 것 방지 |
+| 툴 제한 | `--strict-mcp-config` + `--allowedTools` 화이트리스트(`mcp.json`에 넣은 봇마다 `mcp__<bot>__ask`·`mcp__<bot>__status` 두 개, 러너가 `mcp.json`과 함께 생성), 파일·셸·웹 툴은 명시적 차단 | 오케스트레이터가 서버 파일을 건드리면 안 됨. 권한 프롬프트가 헤드리스에서 멈추는 것 방지 |
 | 턴 상한 | `--max-turns 12` (팬아웃 3봇 + 릴레이 2회 + 되물음 여유) | 토론 모드 폭주 시 구독 한도 보호 |
-| 모델 | 기본 `sonnet`, 토론·복잡 비교만 `opus` 선택 가능 | 오케스트레이션은 판단 위주일 Sonnet으로 충분. 비용은 구독 한도 |
+| 모델 | 기본 `sonnet`, 토론·복잡 비교만 `opus` 선택 가능 | 오케스트레이션은 판단 위주라 Sonnet으로 충분. 비용은 구독 한도 |
 | 작업 디렉터리 | 빈 전용 디렉터리, `CLAUDE.md` 없음 | 프로젝트 지시가 섞이지 않게 |
-| 타임아웃 | 프로세스 전체 300초. 초과 시 SIGTERM 후 UI에 부분 결과 + 실패 표시 | 어댑터 120초 × 2 + 여유 |
+| 타임아웃 | 프로세스 전체 600초. 초과 시 SIGTERM 후 UI에 부분 결과 + 실패 표시 | `ask` 한 번은 재시도 포함 `timeout_s`(기본 120) 안에 끝난다. 릴레이 2단·팬아웃은 여유 있게, 토론 6회는 봇 평균 응답 60초 기준으로 들어가는 값 |
 | 동시 실행 | 허브 세션당 1개. 같은 세션에 메시지가 겹치면 큐잉 | `--resume` 세션 파일 동시 쓰기 방지 |
 
 **stream-json 이벤트 → 허브 이벤트 변환**
 
 | Claude Code 이벤트 | 허브 이벤트 | UI 표시 |
 | --- | --- | --- |
-| `system` (init, session\_id) | `session.bound` | 없음. session\_id 저장 |
+| `system` (init, session\_id) | `run.started` {claude\_session\_id} | 헤더 "실행 중". session\_id 저장 |
 | `assistant` 안 `tool_use` (`mcp__vooy__ask`) | `bot.pending` {bot: vooy} | "Vooy 응답 중…" 말풍선 자리 |
-| `user` 안 `tool_result` | `bot.reply` {bot, raw, structured} | 봇 말풍선 (원문) |
+| `assistant` 안 `tool_use` (`mcp__<bot>__status`) | 없음 | 표시하지 않음 (`tool_call`에만 기록) |
+| `user` 안 `tool_result` (`ask`) | `bot.reply` {bot, raw, structured} | 봇 말풍선 (원문) |
 | `assistant` 안 `text` (중간) | `claude.note` | Claude 말풍선 ("Vooy 답을 뮤즈에 넘깁니다") |
-| `result` (최종) | `claude.final` + `usage` | Claude 정리 말풍선, 세션 통계 갱신 |
-| `result` subtype error / 프로세스 비정상 종료 | `run.failed` | 오류 말풍선, 재시도 버튼 |
+| `result` (최종) | `claude.final` + `usage`, 이어서 `run.finished` {status: done} | Claude 정리 말풍선, 세션 통계 갱신 |
+| `result` subtype error / 프로세스 비정상 종료 | `run.finished` {status: failed} | 오류 띠, 재시도 버튼 |
+| 러너 전체 타임아웃 | `run.finished` {status: timeout} | 부분 결과 + 실패 띠 |
+
+이벤트 type 목록과 봉투의 기준은 docs/05-ui.md 6장이다. 이 표와 다르면 05가 맞다.
 
 **교체 가능성**: 러너는 `Runner` 인터페이스(`start(session, text) → AsyncIterator[HubEvent]`)로 추상화한다. 지인 공유로 전환하면 `ClaudeCodeRunner`를 `AnthropicApiRunner`(API 키 + 직접 tool-use 루프)로 바꾸고, 어댑터·허브·UI는 그대로 둔다.
 
@@ -97,8 +101,10 @@ claude -p "<사용자 메시지>" \
 
 | 툴 | 입력 | 출력 | 비고 |
 | --- | --- | --- | --- |
-| `ask` | `text`, `thread_id`(허브 세션), `timeout_s`(기본 120) | `raw`(봇 원문), `structured`(버튼·링크·카드 목록), `needs_input`(bool), `latency_ms` | 유일한 호출 경로. 큐에 들어가 순서대로 실행 |
-| `status` | 없음 | `available`, `reason`, `last_ok_at`, `queue_depth` | Claude가 호출 전 가용성 확인용 |
+| `ask` | `text`, `thread_id`(허브 세션), `timeout_s`(기본 120), `reset` | `bot`, `ok`, `raw`(봇 원문), `structured`(버튼·링크·카드 목록), `needs_input`(bool), `error`, `latency_ms`, `message_ids` | 유일한 호출 경로. 큐에 들어가 순서대로 실행 |
+| `status` | 없음 | `available`, `reason`, `last_ok_at`, `queue_depth`, `avg_latency_ms` | Claude가 호출 전 가용성 확인용 |
+
+입출력 스키마의 기준은 docs/03-adapters.md 2·3장이다. 이 절은 요약이다.
 
 툴 설명문(description)에는 봇의 특성을 적는다. 예: Vooy는 "한국 서비스 예약·주문·검색에 강함, 텔레그램 응답에 수십 초". Claude Code는 이 설명을 보고 봇을 고른다.
 
@@ -106,10 +112,13 @@ claude -p "<사용자 메시지>" \
 
 | 엔드포인트 | 용도 |
 | --- | --- |
-| `GET /health` | 가용성 + 마지막 응답 시각. 허브가 30초마다 폴링 |
-| `POST /login` | 재로그인 시작. 텔레그램은 인증코드 입력 흐름, 뮤즈·피클은 운영자가 VNC/스크린샷으로 수동 로그인 후 상태 저장 |
+| `GET /health`, `POST /probe` | 가용성 + 마지막 응답 시각. 허브가 30초마다 `/health` 폴링, `/probe`는 실제 확인 |
+| `POST /login/start`, `/login/submit`, `/login/complete` | 재로그인. 텔레그램은 인증코드 입력 흐름, 뮤즈·피클은 운영자가 noVNC로 수동 로그인 후 상태 저장 |
 | `POST /reset` | 봇 대화 스레드 초기화 |
 | `POST /enable`, `/disable` | 운영자 활성/비활성 토글 |
+| `GET /threads`, `GET /logs`, `GET /images/<id>` | 디버깅, 봇 상태 패널 로그, 이미지 프록시 원본 |
+
+전체 목록과 요청·응답 형식은 docs/03-adapters.md 5장이 기준이다.
 
 **공통 베이스 클래스**
 
@@ -119,24 +128,23 @@ class BotAdapter(ABC):
     description: str          # MCP 툴 description에 들어감
     queue: asyncio.Queue      # 어댑터당 하나, 직렬 처리
 
-    async def ask(self, text, thread_id, timeout_s) -> AskResult
-    async def is_available(self) -> Status
+    async def ask(self, text, thread_id, timeout_s=120, reset=False) -> AskResult
+    async def status(self) -> Status
     async def reset(self, thread_id) -> None
-    async def login(self) -> LoginFlow   # 봇별로 다름
 ```
 
-`ask`는 큐에 넣고 결과를 기다리는 래퍼이고, 실제 구현은 `_send(text, thread)`와 `_wait_reply(thread, timeout)` 두 훅이다. 새 봇은 이 둘만 구현한다.
+`ask`는 큐에 넣고 결과를 기다리는 래퍼이고, 봇별 구현은 훅 다섯 개(`_ensure_ready`, `_send`, `_collect`, `_extract`, `_login_flow`)다. 시그니처와 계약은 docs/03-adapters.md 6장이 기준이다.
 
 **봇별 구현 요점**
 
-| 어댑터 | `_send` | `_wait_reply` | 세션 보존 | 특이사항 |
+| 어댑터 | `_send` | `_collect` | 세션 보존 | 특이사항 |
 | --- | --- | --- | --- | --- |
 | Vooy | Telethon으로 Vooy 봇에 메시지 | 새 수신 메시지 이벤트 대기. 봇이 여러 메시지로 쪼개 보내면 2초 침묵까지 묶음 | `.session` 파일 | 전용 텔레그램 계정. 메시지 간격 최소 3초 |
 | 뮤즈 | Playwright로 muse.ai 입력창에 타이핑·전송 | 응답 DOM 노드가 멈출 때까지 MutationObserver 폴링 | 브라우저 프로필 디렉터리 (쿠키) | 컨테이너 egress를 VPN 터널로. 지역 제약 시 Meta Model API 대체 어댑터로 교체 |
 | 피클 | Appium으로 에뮬레이터 안 피클 앱 입력창 조작 | 접근성 트리에서 새 말풍선 노드 등장 대기, OCR은 최후 수단 | 에뮬레이터 스냅샷 | 별도 워커. 상시 vs 온디맨드는 미결 |
 | Mock | 설정된 지연 후 템플릿 응답 | 즉시 | 없음 | `fail_rate`, `needs_input_rate`로 장애·되물음 시뮬레이션 |
 
-**실패 처리**: `_wait_reply` 타임아웃 → 1회 재시도 → 실패 시 `AskResult(error="timeout")` 반환. 로그인 만료 감지 → `available=false` 전환 + 허브에 알림. Claude Code에는 항상 정상 응답 형태로 돌려주고 오류는 필드로 표현한다. MCP 레벨 예외는 Claude Code 실행 자체를 멈출 수 있기 때문이다.
+**실패 처리**: `_collect` 타임아웃 → `timeout_s` 안에서 1회 재시도 → 실패 시 `AskResult(error="timeout")` 반환. 로그인 만료 감지 → `available=false` 전환 + 허브에 알림. Claude Code에는 항상 정상 응답 형태로 돌려주고 오류는 필드로 표현한다. MCP 레벨 예외는 Claude Code 실행 자체를 멈출 수 있기 때문이다.
 
 ## 6. 세션·상태·데이터 모델
 
@@ -179,7 +187,7 @@ DB에는 자격증명을 넣지 않는다. 어댑터 볼륨은 어댑터 컨테�
 
 앱 서버 한 대에 docker compose로 전부 올리고, 안드로이드 에뮬레이터만 KVM이 되는 별도 VM에 둔다. 일반 클라우드 VM은 중첩 가상화가 안 되어 에뮬레이터가 돌지 않거나 매우 느리므로, 베어메탈이나 nested-virt 지원 인스턴스를 골라야 한다.
 
-&#91;embedded content: 배포 구성 · VM 2대, 컨테이너 8개\]
+> 그림: 배포 구성 · VM 2대, 컨테이너 8개 (원본은 claude.ai 문서에만 있음)
 
 | 서버 | 사양 목표 | 이유 |
 | --- | --- | --- |
