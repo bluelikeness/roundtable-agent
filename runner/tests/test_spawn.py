@@ -47,6 +47,9 @@ async def test_first_run_args_and_events(settings, claude_log, monkeypatch):
     ]:
         assert argv[argv.index(flag) + 1] == value
     assert "--verbose" in argv and "--strict-mcp-config" in argv
+    assert argv[argv.index("--tools") + 1] == ""  # 내장 툴 없음
+    assert json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True}
+    assert call["tool_search"] == "false"
     assert set(call["mcp"]["mcpServers"]) == {"mock-a", "mock-b"}
     # 토큰은 파일이 아니라 환경변수로만
     assert TOKEN not in json.dumps(call["mcp"])

@@ -170,3 +170,23 @@ def test_queue_position_counts_open_asks_per_bot():
         )
     )
     assert [(e.payload.bot, e.payload.queue_position) for e in out] == [("mock-a", 0), ("mock-a", 1), ("mock-b", 0)]
+
+
+def test_real_claude_2_1_310_sample():
+    """실제 claude 2.1.310 출력(계정 정보를 지운 사본). Mock 이 되묻고 선택지를 준 경우.
+
+    ui_invalidate·thinking_tokens·rate_limit_event·thinking 블록은 건너뛴다.
+    """
+    p, items = _feed("real_needs_input.jsonl")
+    evs = _events(items)
+    assert [e.type for e in evs] == [
+        "run.started", "claude.note", "bot.pending", "bot.reply", "claude.final", "run.finished",
+    ]
+    assert p.claude_session_id == "cs-real"
+    reply = evs[3].payload
+    assert reply.bot == "mock-a" and reply.ok and reply.needs_input and reply.raw == "몇 시로 할까요?"
+    assert reply.structured["choices"][:1] == ["18:00"]
+    assert evs[4].payload.text.startswith("mock-a에게 물어봤는데")
+    assert evs[4].payload.usage["total_cost_usd"] == 0.0181859
+    recs = [i for i in items if isinstance(i, ToolCallRecord)]
+    assert {(r.tool, r.done) for r in recs} == {("status", False), ("status", True), ("ask", False), ("ask", True)}

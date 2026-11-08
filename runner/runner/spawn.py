@@ -41,6 +41,7 @@ LINE_LIMIT = 16 * 1024 * 1024
 STDERR_TAIL = 40
 # --resume 대상 세션 파일이 없을 때 Claude Code 가 내는 문구. 이 경우 새 세션으로 한 번 더 띄운다
 RESUME_MISSING = "No conversation found"
+HOOKLESS_SETTINGS = '{"disableAllHooks": true}'
 
 
 def render_prompt(template: str, values: dict[str, object]) -> str:
@@ -112,6 +113,11 @@ class ClaudeCodeRunner(Runner):
             "--append-system-prompt-file", str(run_dir / "orchestrator.md"),
             "--mcp-config", str(run_dir / "mcp.json"),
             "--strict-mcp-config",
+            # 내장 툴을 전부 뺀다(파일·셸·웹·Task·Skill 등). MCP 툴만 남는다
+            "--tools", "",
+            # 계정에서 동기화되는 플러그인의 hook 이 러너에서 돌지 않게 한다(P0 ④: 빈 설정으로 실행)
+            "--settings", HOOKLESS_SETTINGS,
+            # --tools 로 이미 빠지지만 설계(02 4장)의 명시적 차단 목록도 그대로 둔다
             "--disallowedTools", s.disallowed_tools,
             "--max-turns", str(s.max_turns),
             "--model", session.model,
@@ -147,6 +153,8 @@ class ClaudeCodeRunner(Runner):
             env[TOKEN_ENV] = token
         # 고정 버전 유지: 실행 중 자동 업데이트를 막는다
         env["DISABLE_AUTOUPDATER"] = "1"
+        # MCP 툴을 지연 로드하지 않는다. 지연되면 매번 ToolSearch 를 한 턴 더 쓴다(--tools "" 로 ToolSearch 도 없다)
+        env["ENABLE_TOOL_SEARCH"] = "false"
         return env
 
     async def _emit_records(self, items) -> AsyncIterator[HubEvent]:

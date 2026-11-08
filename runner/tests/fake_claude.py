@@ -27,7 +27,7 @@ if log:
             prompt_file = f.read()
     with open(log, "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": argv, "stdin": stdin, "mcp": mcp, "prompt": prompt_file, "cwd": os.getcwd(),
-                            "token": os.environ.get("HUB_ADAPTER_TOKEN")}, ensure_ascii=False) + "\n")
+                            "token": os.environ.get("HUB_ADAPTER_TOKEN"), "tool_search": os.environ.get("ENABLE_TOOL_SEARCH")}, ensure_ascii=False) + "\n")
 if "--resume" in argv and os.environ.get("FAKE_CLAUDE_RESUME_MISSING"):
     sys.stderr.write("No conversation found with session ID: " + argv[argv.index("--resume") + 1] + "\n")
     sys.exit(1)
