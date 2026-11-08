@@ -1,6 +1,7 @@
 """허브 설정. 비밀값은 환경변수(.env)로만 받는다."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +22,22 @@ class Settings(BaseSettings):
     # 로그인 실패 잠금 (05-ui 7장: 5회 실패 시 15분)
     login_max_failures: int = 5
     login_lock_s: int = 15 * 60
+
+    # 러너(docs/02-architecture.md 4장). 내부망 주소
+    runner_url: str = "http://runner:8700"
+    # 허브↔어댑터·러너 공유 토큰(X-Hub-Token). compose secret 파일, 없으면 HUB_ADAPTER_TOKEN
+    adapter_token: str = ""
+    adapter_token_file: str = "/run/secrets/hub_adapter_token"
+    # 봇 등록 파일(03 10장). 실행마다 다시 읽는다
+    bots_file: str = str(Path(__file__).resolve().parents[1] / "bots.yaml")
+
+    def read_adapter_token(self) -> str:
+        if self.adapter_token:
+            return self.adapter_token
+        try:
+            return Path(self.adapter_token_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
 
     def require_strong_secret(self) -> None:
         """기본값이나 짧은 서명 키로는 쿠키를 발급·검증하지 않는다(위조 방지)."""

@@ -7,9 +7,9 @@ COMPOSE := docker compose
 COMPOSE_CONTRACT := $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml -f adapters/tests/contract/compose.yml
 JSON2TS := pnpm dlx json-schema-to-typescript@15.0.4
 
-.PHONY: up down logs ps test test-hub test-adapters eval types admin
+.PHONY: up down logs ps test test-hub test-runner test-adapters eval types admin runner-login
 
-up:  ## 로컬 스택 기동 (postgres, hub-api, web, mock-a/b/c)
+up:  ## 로컬 스택 기동 (postgres, hub-api, runner, web, mock-a/b/c)
 	$(COMPOSE) up -d --build --wait
 
 down:
@@ -21,12 +21,16 @@ logs:
 ps:
 	$(COMPOSE) ps
 
-test: test-hub test-adapters  ## hub·adapters·web 전부 (web 은 P1-5 에서 추가)
+test: test-hub test-runner test-adapters  ## hub·runner·adapters·web 전부 (web 은 P1-5 에서 추가)
 
 test-hub:  ## 허브 단위 테스트. 로컬 postgres(5433)의 multibot_test DB 를 쓴다(.env 의 계정)
 	$(COMPOSE) up -d --wait postgres
 	cd hub && uv run pytest -q
 	@echo "hub tests done"
+
+test-runner:  ## 러너 단위 테스트. 가짜 claude 와 stream-json 고정 샘플로 돌린다(실제 claude·로그인 불필요)
+	cd runner && uv run pytest -q
+	@echo "runner tests done"
 
 test-adapters:  ## 어댑터 단위 테스트 + Mock 3개 계약 테스트(docs/03-adapters.md 11장)
 	cd adapters && uv run pytest -q tests/unit
@@ -44,3 +48,6 @@ types:  ## hub/app/events.py -> web/src/types/events.ts
 
 admin:  ## 운영자 계정 관리. 예: make admin ARGS="create-operator --username me"
 	$(COMPOSE) exec hub-api python -m app.admin $(ARGS)
+
+runner-login:  ## 러너 컨테이너의 Claude Code 로그인(운영자가 직접, 최초 1회). 로그인 정보는 runner-claude 볼륨에만 남는다
+	$(COMPOSE) exec -it runner claude auth login

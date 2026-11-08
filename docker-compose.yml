@@ -1,4 +1,4 @@
-# 멀티봇 허브 (VM 1). 러너는 P1-3 에서 추가한다.
+# 멀티봇 허브 (VM 1).
 # 로컬 개발용 포트 노출은 docker-compose.override.yml 에 있다.
 name: multibot
 
@@ -39,11 +39,32 @@ services:
       HUB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-multibot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-multibot}
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?.env 에 HUB_SECRET_KEY 가 필요합니다}
       HUB_COOKIE_SECURE: ${HUB_COOKIE_SECURE:-true}
+      HUB_RUNNER_URL: http://runner:8700
+    secrets:
+      - hub_adapter_token
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Claude Code 러너 (docs/02-architecture.md 4장). 허브만 부른다(내부망, X-Hub-Token).
+  # 첫 기동 후 운영자가 직접 로그인한다: docker compose exec -it runner claude auth login
+  runner:
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+    secrets:
+      - hub_adapter_token
+    volumes:
+      # Claude Code 로그인 상태만 담는다. 다른 서비스는 마운트하지 않는다
+      - runner-claude:/home/runner/.claude
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8700/healthz')"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -81,13 +102,14 @@ services:
     volumes:
       - mock-c-data:/data
 
-# 허브↔어댑터 공유 토큰(X-Hub-Token). 값은 .env 의 HUB_ADAPTER_TOKEN
+# 허브↔어댑터·러너 공유 토큰(X-Hub-Token). 값은 .env 의 HUB_ADAPTER_TOKEN
 secrets:
   hub_adapter_token:
     environment: HUB_ADAPTER_TOKEN
 
 volumes:
   pgdata:
+  runner-claude:
   mock-a-data:
   mock-b-data:
   mock-c-data:

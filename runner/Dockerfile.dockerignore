@@ -1,0 +1,10 @@
+# 빌드 컨텍스트가 레포 루트라 필요한 것만 넣는다
+*
+!runner/pyproject.toml
+!runner/uv.lock
+!runner/.python-version
+!runner/orchestrator.md
+!runner/runner
+!hub/app/events.py
+!hub/app/runner_protocol.py
+**/__pycache__
