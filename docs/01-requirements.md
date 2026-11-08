@@ -142,5 +142,5 @@
 | --- | --- | --- | --- |
 | ① | 전용 텔레그램 계정으로 Vooy 봇 1:1 응답 | 미확인 | |
 | ② | 한국에서 muse.ai 로그인(VPN 포함) | 미확인 | |
-| ③ | 로컬 안드로이드 에뮬레이터에서 피클 로그인·대화 1건 | 미확인 | |
+| ③ | 로컬 안드로이드 에뮬레이터에서 피클 로그인·대화 1건 | **통과**. AVD `pickle_p0`(API 34 google_apis_playstore x86_64, 루팅 없음, Windows WHPX)에서 Play Store 설치·로그인·대화 송수신 성공, 에뮬레이터 차단 없음. 피클 1.1.16(`com.pickle.client`)은 Compose UI라 `resource-id`가 없지만 말풍선 텍스트는 `uiautomator dump`의 `TextView.text`로 전부 읽힘(OCR 불필요). 사용자·봇 말풍선은 x 좌표(봇 왼쪽 66, 사용자 오른쪽)로 구분, 버튼류는 `content-desc`(Voice chat, Add attachment, Menu 등)로 찾음. 첫 Google 로그인은 "Something went wrong" 후 재시도로 성공. 스냅샷 `google_logged_in`·`pickle_logged_in` 저장(로컬 전용, VM 2 이전 불가). 대화 제목 편집 지원 여부는 미확인 | 2026-11-08 |
 | ④ | Claude Code 헤드리스 플래그 유효성 | **통과**. Claude Code 2.1.310(Windows 로컬)에서 `-p --output-format stream-json --verbose --append-system-prompt-file --mcp-config --strict-mcp-config --allowedTools --disallowedTools --max-turns --model` 조합 실행 → `subtype=success`, 주입한 프롬프트 반영 확인. `--max-turns`는 `--help`에 안 나오지만 동작함. 사용자 전역 hook·plugin이 함께 로드되므로 러너는 빈 `~/.claude`에서 돌려야 한다. 빈 MCP 기준 1회 약 $0.056 | 2026-11-08 |
