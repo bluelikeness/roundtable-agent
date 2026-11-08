@@ -84,9 +84,9 @@
 
 | 필드 | 출처 | 비고 |
 | --- | --- | --- |
-| `buttons` | 텔레그램 인라인 키보드, 앱 화면의 버튼 노드 | `action_id`는 어댑터가 만든 식별자. 후속 `ask`의 `text`에 `[tap:btn_3]`을 넣으면 어댑터가 그 버튼을 누른다 |
+| `buttons` | 앱 화면의 버튼 노드, 웹 응답의 버튼 요소 | `action_id`는 어댑터가 만든 식별자. 후속 `ask`의 `text`에 `[tap:btn_3]`을 넣으면 어댑터가 그 버튼을 누른다 |
 | `links` | 메시지 안 URL | 본문에서 추출 |
-| `cards` | 텔레그램 미디어 그룹, 앱의 리스트 아이템 | 식당·상품·항공권 같은 선택지 |
+| `cards` | 앱의 리스트 아이템, 웹 응답의 카드 요소 | 식당·상품·항공권 같은 선택지 |
 | `images` | 이미지 첨부 | URL은 어댑터가 자기 스토리지에 복사한 로컬 경로. 외부 URL 그대로 노출 안 함 |
 | `choices` | 되물음의 선택지 (버튼이 아닌 텍스트 나열) | `needs_input=true`와 함께 |
 | `confirmation_required` | 결제·예약 확정 단계 | UI가 눈에 띄게 표시. Claude Code는 이 단계를 절대 자동으로 넘기지 않고 사용자에게 묻는다 |
@@ -107,7 +107,7 @@
 | done | `AskResult(ok=true)` 반환. `needs_input` 판정 | — |
 | failed | `AskResult(ok=false, error=...)` 반환 | — |
 
-**응답 확정 규칙** (`_collect` 공통, 베이스가 적용): 첫 메시지가 온 뒤 `quiet_s`(기본 2.5초) 동안 새 메시지가 없으면 응답이 끝난 것으로 본다. 봇이 "찾는 중…" 같은 진행 메시지를 보내면 봇별 `progress_patterns`에 맞춰 무시하고 계속 기다린다. 타이핑 표시(텔레그램 typing, 웹 스피너)가 있으면 그게 꺼지는 시점을 우선한다.
+**응답 확정 규칙** (`_collect` 공통, 베이스가 적용): 첫 메시지가 온 뒤 `quiet_s`(기본 2.5초) 동안 새 메시지가 없으면 응답이 끝난 것으로 본다. 봇이 "찾는 중…" 같은 진행 메시지를 보내면 봇별 `progress_patterns`에 맞춰 무시하고 계속 기다린다. 타이핑 표시(웹 스피너, 앱의 응답 중 표시)가 있으면 그게 꺼지는 시점을 우선한다.
 
 **재시도**: waiting 1회차가 응답 없이 끝나면 같은 `text`를 한 번 더 보낸다. 1회차는 waiting 진입 시점 잔여 시간의 절반까지만 기다리고, 재시도는 나머지 안에서 끝낸다. `ask` 한 번은 큐 대기·재시도를 포함해 절대 `timeout_s`를 넘지 않는다. 단, `[tap:]`으로 시작하는 버튼 누르기와 `confirmation_required` 단계의 확정 메시지는 재시도하지 않는다. 중복 결제·예약을 막기 위해서다.
 
@@ -120,8 +120,8 @@ MCP와 같은 프로세스가 별도 포트(기본 9100)로 연다. 허브 API �
 | 메서드·경로 | 요청 | 응답 | 동작 |
 | --- | --- | --- | --- |
 | `GET /health` | — | `status` 툴과 같은 JSON + `version`, `uptime_s` | 허브가 30초마다 폴링. 봇 백엔드에 실제 핑은 하지 않고 마지막 결과를 돌려준다 |
-| `POST /probe` | — | `health`와 같음 | 봇 백엔드에 실제로 가벼운 확인(텔레그램 `get_me`, 페이지 로드, 앱 포그라운드)을 한 뒤 응답. 허브의 "상태 새로고침" 버튼 |
-| `POST /login/start` | `{}` | `{"flow": "code" \| "vnc", "hint": "...", "vnc_url": "..."}` | 로그인 흐름 시작. 텔레그램은 코드 입력형, 뮤즈·피클은 noVNC URL 반환 |
+| `POST /probe` | — | `health`와 같음 | 봇 백엔드에 실제로 가벼운 확인(페이지 로드, 앱 포그라운드)을 한 뒤 응답. 허브의 "상태 새로고침" 버튼 |
+| `POST /login/start` | `{}` | `{"flow": "code" \| "vnc", "hint": "...", "vnc_url": "..."}` | 로그인 흐름 시작. 현재 세 봇(Vooy·뮤즈·피클) 모두 noVNC URL 반환. 코드 입력형(`code`)은 인증코드를 받는 봇을 위해 남겨 둔다 |
 | `POST /login/submit` | `{"code": "12345"}` 또는 `{"password": "..."}` | `{"ok": true}` 또는 `{"ok": false, "next": "password"}` | 코드 입력형 로그인의 다음 단계 |
 | `POST /login/complete` | `{}` | `{"ok": bool}` | VNC 수동 로그인이 끝났다고 운영자가 알림. 어댑터가 로그인 상태를 저장(쿠키·스냅샷)하고 `available` 갱신 |
 | `POST /reset` | `{"thread_id": "..."}` 또는 `{}` | `{"ok": true}` | 특정 봇 대화 초기화. 빈 바디면 전체 |
@@ -160,7 +160,7 @@ class BotAdapter(ABC):
     def serve(self) -> None            # MCP(9000) + 관리 HTTP(9100) 동시 기동
 ```
 
-`Thread`는 어댑터가 `thread_id`에 매핑해 보관하는 봇 쪽 대화 핸들이다(텔레그램은 채팅 ID + 마지막 메시지 ID, 뮤즈는 브라우저 탭·대화 URL, 피클은 앱의 대화 화면 식별자). 디스크에 JSON으로 저장해 재시작 후에도 이어진다.
+`Thread`는 어댑터가 `thread_id`에 매핑해 보관하는 봇 쪽 대화 핸들이다(Vooy는 마지막 수집 말풍선의 해시·시각, 뮤즈는 브라우저 탭·대화 URL, 피클은 앱의 대화 화면 식별자). 디스크에 JSON으로 저장해 재시작 후에도 이어진다.
 
 **`_collect` 계약**: `deadline`까지 새 메시지를 모아 반환한다. 베이스가 `quiet_s` 침묵 판정과 `progress_patterns` 필터를 적용하므로 훅은 "지금까지 도착한 메시지"만 성실히 반환하면 된다.
 
@@ -169,9 +169,9 @@ class BotAdapter(ABC):
 ```yaml
 name: vooy
 description: |
-  한국 생활 서비스(예약·주문·검색·일정)에 강한 AI 에이전트. 텔레그램으로 응답하며
-  보통 20~60초 걸린다. 한국어 전용. 결제·예약 확정 전에 반드시 확인을 요구한다.
-timeouts: {default_s: 120, send_s: 15, quiet_s: 2.5}
+  한국 생활 서비스(예약·주문·검색·일정)에 강한 AI 에이전트. 앱으로 응답하며
+  보통 10~30초 걸린다. 한국어 전용. 결제·예약 확정 전에 반드시 확인을 요구한다.
+timeouts: {default_s: 120, send_s: 15, quiet_s: 3}
 queue: {max_depth: 5, max_wait_s: 60}
 progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있"]
 question_patterns: ["몇 명", "언제", "어디", "\\?$"]
@@ -186,6 +186,7 @@ hub_webhook: http://hub-api:8000/internal/bot-status
 ```
 adapters/
   base.py            # BotAdapter, AskResult, Structured, Thread, serve()
+  android_base.py    # 에뮬레이터 기동·접근성 트리·한글 입력 (Vooy·피클 공통)
   mcp_server.py      # ask/status 툴 등록, streamable HTTP
   admin_api.py       # 관리 HTTP
   vooy/  {adapter.py, config.yaml, Dockerfile}
@@ -196,27 +197,28 @@ adapters/
 
 ## 7. Vooy 어댑터
 
-전용 텔레그램 계정의 유저 세션으로 Vooy 봇과 1:1 채팅한다. 가장 먼저 만들고, 다른 어댑터의 기준 구현이 된다.
+안드로이드 에뮬레이터 안의 Vooy 앱(`com.vooy.mobile`)을 조작한다. 처음 설계는 텔레그램 유저 세션(Telethon)이었으나, P0에서 앱 경로가 GPU 없는 에뮬레이터에서도 한글 송수신까지 동작함을 확인해 앱 경로로 바꿨다(요구사항 7장 ①). 전용 텔레그램 계정·`api_id` 발급·유저 세션 자동화의 계정 정지 위험이 없어진다. 에뮬레이터 기동·접근성 트리 읽기·한글 입력은 피클과 공통이므로 `adapters/android_base.py`로 묶어 두 어댑터가 함께 쓴다. 가장 먼저 만드는 실봇 어댑터이고, 피클 어댑터의 기준 구현이 된다.
 
 | 항목 | 설계 |
 | --- | --- |
-| 라이브러리 | Telethon. `api_id`·`api_hash`는 my.telegram.org에서 전용 계정으로 발급, env 주입 |
-| 세션 | `StringSession`을 암호화 볼륨의 파일로 저장. 컨테이너 재시작 시 재로그인 불필요 |
-| 로그인 흐름 | `CodeLogin`: `/login/start` → 텔레그램이 코드 전송 → `/login/submit {code}` → 2단계 비밀번호가 있으면 `next: password` → `/login/submit {password}` |
-| 대상 | Vooy 봇 username(설정값). 첫 `_ensure_ready`에서 entity를 resolve해 캐시 |
-| `_send` | `client.send_message(bot, text)`. `tap`이 있으면 직전 메시지의 인라인 버튼을 `message.click(data=...)`. `min_interval_s=3` |
-| `_collect` | `events.NewMessage(from_users=bot)` 핸들러로 수신 큐에 쌓고, `deadline`까지 꺼낸다. `events.MessageEdited`도 수집(봇이 진행 메시지를 편집해 결과로 바꾸는 패턴 대응) |
-| `_extract` | 텍스트는 `message.message`, 인라인 버튼은 `reply_markup.rows`에서 `buttons[]`로, 미디어 그룹은 `cards[]`로, 사진은 다운로드해 `images[]` 로컬 경로. 엔티티의 URL은 `links[]` |
-| 스레드 | Vooy는 1:1 채팅이 하나라 봇 쪽 대화는 공유된다. `thread_id` 전환 시 `reset=true`면 Vooy의 새 대화 명령(확인 필요, 미결)을 보내고, 아니면 그대로 이어서 보낸다. `Thread`에는 마지막 수신 메시지 ID만 보관해 `_collect`가 그 이후 메시지만 보게 한다 |
-| 타이핑 신호 | `events.UserUpdate`로 봇의 typing 상태를 받아, typing이 꺼진 뒤 `quiet_s`를 센다 |
-| 레이트 리밋 | Telethon의 `FloodWaitError`를 잡아 `error=rate_limited` + `status.reason=cooldown`(대기 초 포함)으로 보고 |
-| 프로브 | `client.get_me()` 성공 + 봇 entity resolve 성공이면 available |
+| 에뮬레이터 | 어댑터 전용 AVD 1개(피클과 공유하지 않음). API 34 Google Play x86\_64, `-gpu swiftshader_indirect`(GPU 불필요). Vooy는 React Native + Skia라 GPU를 끈(`hw.gpu.enabled=no`) AVD에서는 흰 화면만 나온다 |
+| 자동화 | Python `uiautomator2`(기기에 APK 설치 없음). 앱이 React Native testID를 `resource-id`로 노출하므로 셀렉터는 ID 위주 |
+| 로그인 흐름 | `VncLogin`: noVNC로 에뮬레이터 화면 노출 → 운영자가 앱에서 Google 또는 이메일로 로그인 → `/login/complete`. 로그인 상태는 AVD 디스크(userdata)에 남는다 |
+| 스냅샷 | 쓰지 않는다. Vooy가 Vulkan을 쓰는 앱이라 한 번 띄운 세션은 스냅샷 저장이 거부된다(`UNSUPPORTED_VK_APP`). 재시작은 콜드 부팅(P0 실측 약 20초) + 디스크의 로그인 유지로 처리 |
+| 대상 화면 | 하단 탭 `android-gnb-home`의 에이전트 대화방. `_ensure_ready`에서 앱 포그라운드 + 입력창(`content-desc="Message"`) 존재까지 맞춘다 |
+| `_send` | 입력창 탭 → 키보드가 올라와 입력창이 이동하므로 다시 찾은 뒤 `set_text(text)`(한글·특수문자 가능, `adb shell input text`는 불가) → `content-desc="Send message"` 탭. `tap`은 직전 응답 영역의 버튼 노드를 `content-desc`/텍스트로 찾아 클릭. `min_interval_s=3` |
+| `_collect` | 1초 간격으로 접근성 트리를 읽어 `other-message-bubble` 노드를 화면 y 좌표순으로 정렬(트리 순서는 최신이 먼저라 역순)하고, `Thread`의 마지막 확인 말풍선 이후에 생긴 것을 수집. 스트리밍 표시(`agent-message-segments` 등)가 사라진 뒤 `quiet_s`(3)를 센다 |
+| `_extract` | 말풍선 하위 `TextView` 텍스트가 원문(끝의 시각 텍스트·`U+FFFC` 개체 문자는 제거), 응답 영역의 `clickable` 노드는 `buttons[]`, 리스트 아이템은 `cards[]`, URL 텍스트는 `links[]`, 이미지는 스크린샷을 노드 bounds로 크롭해 `images[]`. 예약·결제 확인 화면은 `confirmation_required` |
+| 스레드 | 앱의 에이전트 대화방은 하나라 봇 쪽 대화는 공유된다. `thread_id` 전환 시 `reset=true`면 새 대화 기능(확인 필요, 미결)을 쓰고, 없으면 그대로 이어서 보낸다. `Thread`에는 마지막으로 수집한 말풍선의 텍스트 해시·시각만 보관 |
+| 레이트 리밋 | 앱에는 명시적 신호가 없다. 메시지 간격 3초와 하루 전송 상한(설정, 기본 300건)을 어댑터가 강제하고, 앱이 제한 안내를 띄우면 `progress_patterns`와 별도의 `limit_patterns`로 잡아 `error=rate_limited` |
+| 프로브 | 에뮬레이터 `boot_completed` + 앱 포그라운드 + 입력창 존재. 로그인 화면(`Continue with Google` 등)이면 `login_required`. 에뮬레이터가 응답 없으면 재부팅 후 재확인, 그래도 안 되면 `backend_down` |
 
 **리스크와 대응**
 
-- 텔레그램 계정 제한: 전용 계정, 메시지 간격 3초, 하루 전송 상한(설정, 기본 300건)을 어댑터가 강제한다.
-- Vooy가 여러 메시지로 쪼개 답할 때: `quiet_s`로 묶는다. 쪼개진 메시지 사이 간격이 2.5초를 넘기는 경우가 관찰되면 Vooy 설정의 `quiet_s`만 올린다.
-- Vooy 봇 쪽 대화 스레드가 허브 세션별로 분리되지 않는 점: 1차에서는 허용. Claude Code 시스템 프롬프트에 "Vooy는 직전 대화를 기억할 수 있으니 필요한 맥락을 메시지에 포함하라"를 둔다.
+- 계정이 운영자 개인 Vooy 계정이면 허브 질문이 개인 알림과 같은 대화방에 섞인다: 전용 계정(전용 Google 계정 로그인)을 권장한다. 개인 계정으로 쓰는 동안 `_collect`는 송신 이후에 생긴 말풍선만 보므로 기능 문제는 없다.
+- 앱 업데이트로 testID·화면 구조 변경: 셀렉터를 `selectors.yaml`로 분리하고 에뮬레이터의 자동 업데이트를 끈다. 프로브가 핵심 셀렉터 존재를 검사해 깨지면 `backend_down`.
+- 응답을 여러 말풍선으로 나눠 보낼 때: `quiet_s`로 묶는다. P0에서는 한 말풍선으로 왔다.
+- Vooy 쪽 대화가 허브 세션별로 분리되지 않는 점: 1차에서는 허용. Claude Code 시스템 프롬프트에 "Vooy는 직전 대화를 기억할 수 있으니 필요한 맥락을 메시지에 포함하라"를 둔다.
 
 ## 8. 뮤즈 어댑터
 
@@ -242,17 +244,17 @@ muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정�
 
 ## 9. 피클 어댑터
 
-안드로이드 에뮬레이터 안의 피클 앱을 Appium으로 조작한다. VM 2에서 돌고, 허브와는 WireGuard 사설망으로만 연결된다.
+안드로이드 에뮬레이터 안의 피클 앱을 `android_base.py`(Vooy와 공통)로 조작한다. VM 2에서 돌고, 허브와는 WireGuard 사설망으로만 연결된다.
 
 | 항목 | 설계 |
 | --- | --- |
-| 에뮬레이터 | Android SDK 에뮬레이터, x86\_64 시스템 이미지(API 34, Google APIs), KVM 가속. 해상도 1080×2400, 한국어 로케일 |
-| 자동화 | Appium 2 + UiAutomator2 드라이버. 접근성 트리(`page_source`)에서 텍스트 노드를 읽는다. OCR(Tesseract)은 접근성 라벨이 없는 뷰에만 보조로 |
+| 에뮬레이터 | 어댑터 전용 AVD(Vooy와 공유하지 않음 — 화면을 동시에 쓸 수 없고, Vooy를 띄운 AVD는 스냅샷이 막히므로). Android SDK 에뮬레이터, x86\_64 시스템 이미지(API 34, Google Play), KVM 가속, `-gpu swiftshader_indirect`. 해상도 1080×2400, 한국어 로케일 |
+| 자동화 | `android_base.py`(Python `uiautomator2`, Vooy와 공통). 피클은 Compose UI라 `resource-id`가 없어 접근성 트리의 `TextView.text`와 x 좌표(봇 왼쪽·사용자 오른쪽)로 말풍선을 구분한다. OCR(Tesseract)은 접근성 라벨이 없는 뷰에만 보조로 |
 | 로그인 흐름 | `VncLogin`: 에뮬레이터 화면을 noVNC로 노출. 운영자가 앱에서 로그인·권한 승인 → `/login/complete` → 어댑터가 `adb emu avd snapshot save logged_in` |
 | 스냅샷 | 로그인 상태 스냅샷을 볼륨에 보관. 재시작·온디맨드 기동 시 `-snapshot logged_in`으로 복원 |
 | 스레드 | 피클 앱의 대화 목록에서 `thread_id`에 대응하는 대화를 찾아 진입. 새 `thread_id`면 새 대화 생성 후 제목을 `thread_id`로 바꿔 식별(앱이 제목 편집을 지원하는지 확인 필요, 미결) |
-| `_send` | 입력창 element에 `send_keys` 후 전송 버튼 탭. 한글 입력은 Appium 유니코드 키보드 사용. `tap`은 직전 응답 영역의 버튼 element를 `accessibility id` 또는 텍스트로 찾아 클릭 |
-| `_collect` | 1초 간격으로 `page_source` diff. 새 어시스턴트 말풍선 노드가 추가되거나 마지막 말풍선 텍스트가 바뀌면 수집. 피클은 실행 진행을 카드로 보여주므로 `progress_patterns`에 진행 카드 텍스트 등록. `quiet_s`는 4 |
+| `_send` | 입력창을 탭해 포커스를 준 뒤 `d.send_keys(text)`(클립보드 붙여넣기)로 입력하고 전송 버튼 탭. 피클 입력창은 포커스를 받으면 접근성 트리에서 사라져 `set_text`가 안 된다(P0 확인). 클립보드에 마지막 입력이 남으므로 전송 후 비운다. `tap`은 직전 응답 영역의 버튼 element를 `accessibility id` 또는 텍스트로 찾아 클릭 |
+| `_collect` | 1초 간격으로 접근성 트리 diff. 새 어시스턴트 말풍선 노드가 추가되거나 마지막 말풍선 텍스트가 바뀌면 수집. 피클은 실행 진행을 카드로 보여주므로 `progress_patterns`에 진행 카드 텍스트 등록. `quiet_s`는 4 |
 | `_extract` | 말풍선 텍스트, 버튼 노드(`clickable=true`)는 `buttons[]`, 리스트 아이템은 `cards[]`. 이미지는 `screenshot` 후 element bounds로 크롭해 `images[]`. 결제·예약 승인 시트는 `confirmation_required` |
 | 프로브 | 앱이 포그라운드인지 + 대화 목록 화면 element 존재. 로그인 화면이면 `login_required`. 에뮬레이터 응답 없으면 재부팅 후 스냅샷 복원, 그래도 안 되면 `backend_down` |
 | 기동 모드 | 설정 `mode: always_on \| on_demand`. on\_demand는 `ask` 진입 시 에뮬레이터 부팅(스냅샷 복원 30\~60초, `send_s`에 포함되지 않게 별도 `boot_s=90`), 유휴 10분 후 종료 |
@@ -303,7 +305,7 @@ mock:
 | `ask` 타임아웃 | `timeout_s=10`으로 느린 응답 유도 → 재시도 1회 후 `ok=false, error=timeout`, MCP 예외 없음 |
 | `ask` 로그인 만료 | 세션 제거 후 호출 → `error=login_required`, `status.reason=login_required`, 허브 웹훅 호출됨 |
 | 동시 `ask` 3건 | 직렬 처리, `queue_depth` 최대 2, 순서 보존 |
-| `thread_id` 분리 | 두 스레드에 교차 전송 → 각 스레드 응답이 섞이지 않음(Mock·뮤즈·피클), Vooy는 문서화된 공유 동작 확인 |
+| `thread_id` 분리 | 두 스레드에 교차 전송 → 각 스레드 응답이 섞이지 않음(Mock·뮤즈·피클), Vooy는 문서화된 공유 동작(대화방 하나) 확인 |
 | `[tap:]` | 직전 응답의 `action_id`로 버튼 클릭 성공, 존재하지 않는 `action_id`는 `error=internal` + 설명 |
 | `status` | 프로브 전후 값 변화, `avg_latency_ms` 갱신 |
 | 관리 HTTP 인증 | 토큰 없는 요청 401 |
@@ -311,13 +313,14 @@ mock:
 
 **실봇 스모크 테스트** (수동, 어댑터 착수 완료 기준)
 
-- Vooy: "내일 점심 강남 한식 2명 예약 가능한 곳" → 응답 수신, 버튼 파싱, `[tap:]`으로 선택지 하나 누르기까지.
+- Vooy: 콜드 부팅 후 "내일 점심 강남 한식 2명 예약 가능한 곳" → 응답 수신, 버튼 파싱, `[tap:]`으로 선택지 하나 누르기까지.
 - 뮤즈: 로그인 후 간단한 질문 1건 + 새 대화 생성 + 재방문.
 - 피클: 스냅샷 복원 후 대화 1건, 에뮬레이터 재부팅 후 다시 1건.
 
 **미결 사항**
 
-- [ ] Vooy의 "새 대화" 명령이 있는지, 없으면 `reset`을 어떻게 구현할지 (실사용 확인)
+- [ ] Vooy 앱에 새 대화(대화 초기화) 기능이 있는지, 없으면 `reset`을 어떻게 구현할지 (실사용 확인)
+- [ ] Vooy 전용 계정을 둘지(개인 계정이면 개인 알림과 대화방 공유)
 - [ ] 피클 앱이 대화 제목 편집을 지원하는지. 안 되면 대화 생성 순서로 식별
 - [ ] 뮤즈 VPN 경유 로그인이 계정 지역 체크를 통과하는지 (요구사항 미결과 동일)
 - [ ] 피클 `on_demand` 모드의 부팅 지연을 Claude Code 타임아웃 안에 어떻게 넣을지 — `status`가 `booting`을 돌려주고 Claude가 기다리게 할지, 허브가 미리 깨울지
