@@ -102,6 +102,33 @@ services:
     volumes:
       - mock-c-data:/data
 
+  # Vooy 어댑터 (docs/03-adapters.md 7장). 실봇이라 기본 기동에서 빠진다: docker compose --profile vooy up -d vooy
+  # 에뮬레이터(전용 AVD "vooy")와 adb 서버는 컨테이너 밖에 있다. adb 서버 주소로 붙는다(adapters/vooy/README.md).
+  vooy:
+    profiles: ["vooy"]
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    environment:
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      ANDROID_SERIAL: ${VOOY_ANDROID_SERIAL:-emulator-5554}
+      ANDROID_ADB_SERVER_HOST: ${VOOY_ADB_SERVER_HOST:-host.docker.internal}
+      ANDROID_ADB_SERVER_PORT: ${VOOY_ADB_SERVER_PORT:-5037}
+      ANDROID_VNC_URL: ${VOOY_VNC_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - hub_adapter_token
+    volumes:
+      # 스레드 핸들·하루 전송 수·이미지. 앱 로그인 상태는 여기 없다(AVD 디스크에 있다)
+      - vooy-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
 # 허브↔어댑터·러너 공유 토큰(X-Hub-Token). 값은 .env 의 HUB_ADAPTER_TOKEN
 secrets:
   hub_adapter_token:
@@ -113,3 +140,4 @@ volumes:
   mock-a-data:
   mock-b-data:
   mock-c-data:
+  vooy-data:

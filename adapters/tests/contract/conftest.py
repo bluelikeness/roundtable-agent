@@ -83,6 +83,61 @@ class MockDriver:
 
 
 @dataclass
+class FakeVooyDriver(MockDriver):
+    """Vooy 어댑터 + 가짜 기기(adapters/testing/fake_vooy.py). 지시어 이름만 다르다."""
+
+    shared_thread: bool = True  # 앱의 에이전트 대화방은 하나(03 7장)
+
+    def normal_text(self, s: str) -> str:
+        return s
+
+    def slow_text(self, s: str) -> str:
+        return f"[vooy:slow] {s}"
+
+    def buttons_text(self) -> str:
+        return "[vooy:buttons] 강남 식당 추천해줘"
+
+    def confirm_text(self) -> str:
+        return "[vooy:confirm] 기차표 결제해줘"
+
+    def image_text(self) -> str | None:
+        return "[vooy:image] 사진 보여줘"
+
+    def expire_login(self) -> None:
+        compose("exec", "-T", self.service, "rm", "-f", "/data/fake-vooy/session")
+
+
+@dataclass
+class LiveVooyDriver(MockDriver):
+    """실제 Vooy(에뮬레이터 + 로그인된 앱). 사람이 CONTRACT_TARGETS=vooy 로 돌린다.
+
+    실봇에 메시지가 실제로 간다(한 번 돌리면 20건 안팎). 실봇에서 만들 수 없는 상황은 건너뛴다:
+    로그인 만료(로그아웃하면 사람이 다시 로그인해야 한다), 확정 단계(실제 결제·예약 위험), 이미지.
+    느린 응답은 timeout_s=10 으로 만든다(Vooy 응답이 12~15초라 10초 안에 오지 않는다).
+    """
+
+    shared_thread: bool = True
+
+    def normal_text(self, s: str) -> str:
+        return f"(자동 시험) '{s}' 라고만 짧게 답해줘"
+
+    def slow_text(self, s: str) -> str:
+        return f"(자동 시험) {s}"
+
+    def buttons_text(self) -> str:
+        pytest.skip("실봇에서 버튼이 달린 응답을 확정적으로 만들 수 없음(스모크 체크리스트에서 사람이 확인)")
+
+    def confirm_text(self) -> str:
+        pytest.skip("실봇 확정 단계는 실제 결제·예약 위험이 있어 계약 테스트에서 만들지 않음")
+
+    def image_text(self) -> str | None:
+        return None
+
+    def expire_login(self) -> None:
+        pytest.skip("실봇 로그인 만료는 사람이 로그아웃·재로그인해야 해서 자동으로 만들지 않음")
+
+
+@dataclass
 class Target:
     name: str
     mcp_url: str
@@ -111,11 +166,14 @@ KNOWN = {
     "mock-a": (9001, 9101),
     "mock-b": (9002, 9102),
     "mock-c": (9003, 9103),
+    "vooy-fake": (9004, 9104),
+    "vooy": (9005, 9105),
 }
+DRIVERS = {"vooy-fake": FakeVooyDriver, "vooy": LiveVooyDriver}
 
 
 def _targets() -> list[Target]:
-    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c").split(",") if n.strip()]
+    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c,vooy-fake").split(",") if n.strip()]
     out = []
     for n in names:
         if n not in KNOWN:
@@ -126,7 +184,7 @@ def _targets() -> list[Target]:
                 name=n,
                 mcp_url=f"http://127.0.0.1:{mcp_port}/mcp",
                 admin_url=f"http://127.0.0.1:{admin_port}",
-                driver=MockDriver(service=n),
+                driver=DRIVERS.get(n, MockDriver)(service=n),
             )
         )
     return out

@@ -1,7 +1,7 @@
 [project]
 name = "multibot-adapters"
 version = "0.1.0"
-description = "멀티봇 어댑터 베이스와 Mock 어댑터"
+description = "멀티봇 어댑터 베이스, Mock·Vooy 어댑터"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "mcp>=1.20",
@@ -21,6 +21,12 @@ dev = [
     "jsonschema>=4.23",
     # mcp 2.x 클라이언트(streamable_http_client)가 받는 HTTP 클라이언트. 계약 테스트가 직접 만든다
     "httpx2>=2.16",
+]
+# 안드로이드 앱 경로 어댑터(Vooy·피클) 전용. android_base.py 가 쓴다(03 6·7장).
+# Mock 이미지에는 넣지 않는다: Mock Dockerfile 은 --no-dev 만 쓰고 이 그룹을 고르지 않는다
+android = [
+    "uiautomator2==3.7.1",
+    "pillow>=10.4",
 ]
 
 [tool.pytest.ini_options]

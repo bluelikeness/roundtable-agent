@@ -1,0 +1,26 @@
+name: vooy
+description: |
+  한국 생활 서비스(맛집 예약·길 찾기·택시 호출·일정·메일 확인)에 강한 AI 에이전트 "Vooy".
+  안드로이드 앱으로 대화하며 응답은 보통 12~30초 걸린다. 한국어로 답한다.
+  결제·예약 확정 전에는 확인을 요구한다(confirmation_required).
+  봇 쪽 대화방이 하나뿐이고 이전 대화를 기억하므로, 필요한 맥락(날짜·인원·지역)은 메시지에 모두 넣는다.
+  코딩·긴 문서 작성·일반 지식 질문에는 쓰지 않는다.
+timeouts: {default_s: 120, send_s: 15, quiet_s: 3}
+queue: {max_depth: 5, max_wait_s: 60}
+min_interval_s: 3
+progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있", "^알아보고 있"]
+question_patterns: ["몇 명", "언제", "어디", "\\?$"]
+# 앱이 사용 제한을 안내하는 문구. 맞으면 error=rate_limited (03 7장 레이트 리밋)
+limit_patterns: ["사용량을 모두", "잠시 후 다시", "한도", "too many requests"]
+health: {probe_interval_s: 300}
+hub_webhook: http://hub-api:8000/internal/bot-status
+android:
+  # ANDROID_SERIAL env 가 우선한다. 전용 AVD "vooy" 를 띄운 adb 시리얼
+  serial: emulator-5554
+  package: com.vooy.mobile
+  input_method: set_text
+  boot_timeout_s: 120
+  app_start_wait_s: 8
+  daily_limit: 300
+  # noVNC URL 은 VM 2 프로비저닝 때 정한다(env ANDROID_VNC_URL)
+  vnc_url: ""

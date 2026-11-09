@@ -1,0 +1,46 @@
+# Vooy 앱(com.vooy.mobile) 셀렉터 (docs/03-adapters.md 7장).
+# 앱 업데이트로 화면 구조가 바뀌면 이 파일만 고친다. 프로브가 input·send·home_tab 존재를 검사한다.
+# 키 이름: rid=resource-id(RN testID), desc=content-desc, text=텍스트. *_re 는 정규식.
+# 기준: Vooy 1.4.4 (P0 확인, 2026-11-08 / P2 접근성 트리 재확인, 2026-11-09)
+
+# 입력창과 전송 버튼. input_u2 는 uiautomator2 set_text 용 셀렉터(키 이름이 다르다)
+input: {desc: Message}
+input_u2: {description: Message}
+send: {desc: Send message}
+# 하단 탭의 에이전트 대화방. 대화방이 아닌 화면이면 이 탭을 누른다
+home_tab: {rid: android-gnb-home}
+# 대화 목록 ScrollView. 버튼·이미지는 이 안에서만 찾는다
+conversation: {desc: Conversation}
+# 입력창 묶음(이보다 아래는 대화 영역이 아니다)
+composer: {rid: composer-input-pill}
+
+# 말풍선 testID. 트리 순서는 최신이 먼저라 y 좌표로 정렬한다
+bot_bubble: other-message-bubble
+own_bubble: own-message-bubble
+
+# 말풍선 안 시각 텍스트("12:58 AM", "오후 3:02"). 원문에서 뺀다
+timestamp_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*[AaPp][Mm])?\s*$'
+
+# 응답 중 표시. 이 testID 가 보이면 침묵(quiet_s) 판정을 미룬다(03 4장).
+# agent-message-segments 는 설계 문서의 후보 이름이다. 실봇에서 확인 필요(스모크 체크리스트 7번)
+streaming_rids: [agent-message-segments]
+# 하단 vooy 탭의 content-desc 가 응답 중에 바뀌면 여기에 정규식을 넣는다. 대기 중 값은 "vooy tab, Done".
+# 응답 중 값을 아직 못 봤으므로 비워 둔다(비면 쓰지 않는다)
+typing_tab_desc_re: ''
+
+# 로그인 화면 표지. 하나라도 보이면 login_required
+login_markers:
+  - Continue with Google
+  - Continue with email
+  - Sign in with Google
+  - Sign in
+  - Log in
+  - 로그인
+  - Google로 계속
+
+# 응답 영역에서 버튼으로 보지 않는 clickable 노드(내 말풍선의 이모지 반응 "sun, 1 person" 등)
+exclude_button_desc_re: ',\s*\d+\s+(person|people)$'
+# 이미지 노드 클래스(끝부분 일치)
+image_classes: [ImageView, ReactImageView]
+# 이 라벨의 버튼은 일반 버튼이 아니라 확정 단계(confirmation_required)로 올린다
+confirm_button_re: '결제|예약\s*확정|구매|주문\s*확정|송금|Pay|Confirm'
