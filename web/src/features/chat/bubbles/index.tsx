@@ -148,11 +148,14 @@ interface FinalProps {
   item: FinalItem;
   /** 세션의 마지막 정리인지. 지난 확정 질문에는 버튼을 붙이지 않는다. 기본 true */
   latest?: boolean;
+  /** 이 정리 전 봇 응답에 confirmation_required 가 있었다(1차 신호). 정리 문구와 상관없이 [진행]을 붙인다 */
+  confirmPending?: boolean;
   onSend?: (text: string) => void;
 }
 
-export function Final({ item, latest = true, onSend }: FinalProps) {
-  const confirm = latest && !!onSend && isConfirmQuestion(item.text);
+export function Final({ item, latest = true, confirmPending = false, onSend }: FinalProps) {
+  // 1차 신호는 봇의 구조화 마커(confirmation_required), 문구 정규식은 마커를 못 뽑은 봇을 위한 보조 신호
+  const confirm = latest && !!onSend && (confirmPending || isConfirmQuestion(item.text));
   return (
     <div className="row left">
       <div className="bubble final" title={absolute(item.ts)} aria-live="assertive">

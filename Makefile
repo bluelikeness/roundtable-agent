@@ -9,8 +9,11 @@ JSON2TS := pnpm dlx json-schema-to-typescript@15.0.4
 # 평가 전용 스택(운영 스택과 다른 compose 프로젝트). runner/eval/compose.yml 참고
 COMPOSE_EVAL := $(COMPOSE) -p multibot-eval -f runner/eval/compose.yml
 EVAL_TOKEN := runner/eval/out/token
+# UI E2E 전용 스택(운영·평가와 다른 compose 프로젝트). e2e/compose.yml 참고
+COMPOSE_E2E := $(COMPOSE) -p multibot-e2e --env-file e2e/out/env -f e2e/compose.yml
+RAND_HEX = head -c $(1) /dev/urandom | od -An -tx1 | tr -d ' \n'
 
-.PHONY: up down logs ps test test-hub test-runner test-adapters test-web eval types admin runner-login
+.PHONY: up down logs ps test test-hub test-runner test-adapters test-web eval e2e types admin runner-login
 
 up:  ## 로컬 스택 기동 (postgres, hub-api, runner, web, mock-a/b/c)
 	$(COMPOSE) up -d --build --wait
@@ -49,6 +52,17 @@ eval:  ## T1~T14 평가: 실제 claude -p 를 Mock 으로 각 5회. 러너 로�
 	@test -s $(EVAL_TOKEN) || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > $(EVAL_TOKEN)
 	$(COMPOSE_EVAL) up -d --build --wait
 	$(COMPOSE_EVAL) run --rm eval python -m eval $(ARGS); rc=$$?; $(COMPOSE_EVAL) down; exit $$rc
+
+# make test 에 넣지 않는다: 실제 claude -p 를 돌려 러너 로그인(make runner-login)과 구독 사용량이 필요하고,
+# LLM 응답이 매번 달라 결정적이지 않다(make eval 과 같은 이유). P1 게이트·프롬프트 수정 뒤에 돌린다.
+e2e:  ## UI E2E 5개(Playwright): Mock + 실제 허브·러너. 예: make e2e ARGS="-g T8", 스택 유지는 E2E_KEEP=1
+	@mkdir -p e2e/out/bots
+	@test -s e2e/out/token || $(call RAND_HEX,24) > e2e/out/token
+	@test -s e2e/out/env || printf 'E2E_POSTGRES_PASSWORD=%s\nE2E_HUB_SECRET_KEY=%s\n' "$$($(call RAND_HEX,16))" "$$($(call RAND_HEX,32))" > e2e/out/env
+	@cp e2e/bots/default.yaml e2e/out/bots/bots.yaml
+	$(COMPOSE_E2E) up -d --build --wait
+	(cd e2e && pnpm install --frozen-lockfile && pnpm exec playwright test $(ARGS)); rc=$$?; \
+	  if [ -z "$(E2E_KEEP)" ]; then $(COMPOSE_E2E) down; fi; exit $$rc
 
 types:  ## hub/app/events.py -> web/src/types/events.ts
 	uv run -q --project hub python scripts/gen_types.py web/src/types/events.schema.json
