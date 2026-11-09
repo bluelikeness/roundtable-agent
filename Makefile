@@ -38,10 +38,10 @@ test-runner:  ## 러너 단위 테스트. 가짜 claude 와 stream-json 고정 �
 	cd runner && uv run pytest -q
 	@echo "runner tests done"
 
-test-adapters:  ## 어댑터 단위 테스트 + Mock 3개 계약 테스트(docs/03-adapters.md 11장)
-	cd adapters && uv run pytest -q tests/unit
-	$(COMPOSE_CONTRACT) up -d --build --wait webhook-sink mock-a mock-b mock-c
-	cd adapters && uv run pytest -q tests/contract -n 3 --dist loadgroup
+test-adapters:  ## 어댑터 단위 테스트 + Mock 3개·Vooy(가짜 기기) 계약 테스트(docs/03-adapters.md 11장)
+	cd adapters && uv run --group android pytest -q tests/unit
+	$(COMPOSE_CONTRACT) up -d --build --wait webhook-sink mock-a mock-b mock-c vooy-fake
+	cd adapters && uv run pytest -q tests/contract -n 4 --dist loadgroup
 	@echo "adapter tests done"
 
 test-web:  ## 웹 타입 검사 + 스토어 리듀서 스냅샷·말풍선·입력창 테스트(vitest)

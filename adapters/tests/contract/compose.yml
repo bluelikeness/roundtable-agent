@@ -19,3 +19,32 @@ services:
   mock-c:
     environment:
       HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+  # Vooy 어댑터 코드를 가짜 기기(adapters/testing/fake_vooy.py)에 붙여 계약 테스트에 올린다.
+  # 실제 에뮬레이터·계정은 쓰지 않는다. 실봇 대상(vooy)은 CONTRACT_TARGETS=vooy 로 따로 돌린다(adapters/vooy/README.md)
+  vooy-fake:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    environment:
+      ADAPTER_NAME: vooy-fake
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.testing.fake_vooy:FakeVooyDevice
+      FAKE_VOOY_DIR: /data/fake-vooy
+    secrets:
+      - hub_adapter_token
+    volumes:
+      - vooy-fake-data:/data
+    ports:
+      - "127.0.0.1:9004:9000"
+      - "127.0.0.1:9104:9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  vooy:
+    environment:
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+
+volumes:
+  vooy-fake-data:
