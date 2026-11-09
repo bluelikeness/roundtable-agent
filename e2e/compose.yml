@@ -1,0 +1,117 @@
+# UI E2E(make e2e) 전용 스택. 운영 스택(multibot)·평가 스택(multibot-eval)과 섞이지 않게 별도 프로젝트로 띄운다.
+#   docker compose -p multibot-e2e --env-file e2e/out/env -f e2e/compose.yml ...
+# - 허브·DB·웹·러너·Mock 전부 새로 띄운다. DB 는 tmpfs 라 테스트 운영자와 대화가 끝나면 사라진다
+# - 비밀값(DB 비밀번호, 쿠키 키, 어댑터 토큰)은 make e2e 가 실행마다 만드는 임시 값(e2e/out, 커밋 안 함)
+# - Claude Code 로그인은 운영 러너 볼륨(multibot_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
+#   tmpfs 라 E2E 대화가 운영 볼륨에 남지 않는다(평가 스택과 같은 방식)
+# - Mock 설정은 평가와 같은 고정 시나리오(runner/eval/mocks)를 쓴다. 기본 Mock 의 무작위 실패·되물음은 끈 것
+# - 허브 bots.yaml 은 e2e/out/bots/bots.yaml 이다. 테스트가 시나리오마다 e2e/bots/*.yaml 을 복사해 넣고,
+#   허브는 실행마다·헬스체크마다 다시 읽는다(봇 이름은 그대로, mcp_url 만 변형 Mock 으로 바뀐다)
+# - 웹만 127.0.0.1:8090 으로 연다(Playwright 가 붙는 곳)
+name: multibot-e2e
+
+x-mock: &mock
+  build:
+    context: ../adapters
+    dockerfile: mock/Dockerfile
+  secrets: [hub_adapter_token]
+  tmpfs: [/data]
+  volumes: [../runner/eval/mocks:/cfg:ro]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: multibot
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD:?make e2e 가 e2e/out/env 를 만든다}
+      POSTGRES_DB: multibot
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multibot -d multibot"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  hub-api:
+    build: ../hub
+    environment:
+      HUB_DATABASE_URL: postgresql+asyncpg://multibot:${E2E_POSTGRES_PASSWORD}@postgres:5432/multibot
+      HUB_SECRET_KEY: ${E2E_HUB_SECRET_KEY:?make e2e 가 e2e/out/env 를 만든다}
+      HUB_COOKIE_SECURE: "false"
+      HUB_RUNNER_URL: http://runner:8700
+      HUB_BOTS_FILE: /cfg/bots.yaml
+      # 시나리오를 바꾸면 봇 상태가 몇 초 안에 따라오게 한다(운영 30초)
+      HUB_HEALTH_INTERVAL_S: "2"
+    secrets: [hub_adapter_token]
+    volumes:
+      - ./out/bots:/cfg:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  runner:
+    build:
+      context: ..
+      dockerfile: runner/Dockerfile
+    secrets: [hub_adapter_token]
+    volumes:
+      - runner-claude:/home/runner/.claude
+      - ../runner/orchestrator.md:/srv/runner/orchestrator.md:ro
+    tmpfs:
+      - /home/runner/.claude/projects:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8700/healthz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: ../web
+    depends_on: [hub-api]
+    ports:
+      - "127.0.0.1:${E2E_WEB_PORT:-8090}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # 기본 Mock 3개 + 시나리오 변형(평가 스택과 같은 설정 파일). 웹훅은 쓰지 않는다: 변형 Mock 도 이름이
+  # mock-a·mock-b 라 웹훅을 보내면 지금 쓰지 않는 쪽 상태가 섞인다. 상태는 허브 헬스체크(2초)로만 받는다
+  mock-a:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/mock-a.yaml}
+  mock-b:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-b, ADAPTER_CONFIG: /cfg/mock-b.yaml}
+  mock-c:
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-c, ADAPTER_CONFIG: /cfg/mock-c.yaml}
+  a-budget:   # T7 예산 되물음(매번)
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-budget.yaml}
+  a-confirm:  # T8 확정 요청 → [tap:] 이면 확정 완료
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-a, ADAPTER_CONFIG: /cfg/a-confirm.yaml}
+  b-down:     # T10 기동 직후부터 login_required
+    <<: *mock
+    environment: {ADAPTER_NAME: mock-b, ADAPTER_CONFIG: /cfg/b-down.yaml}
+
+secrets:
+  hub_adapter_token:
+    file: ./out/token
+
+volumes:
+  runner-claude:
+    external: true
+    name: multibot_runner-claude

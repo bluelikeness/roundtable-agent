@@ -141,7 +141,29 @@ describe("Claude 정리의 [진행] 버튼", () => {
       { key: "a2", kind: "pending", bot: "a" },
       { key: "u1", kind: "user" },
     ] as unknown as ChatItem[];
-    expect(latestKeys(items)).toEqual({ bots: { a: "a2", b: "b1" }, final: null });
+    expect(latestKeys(items)).toEqual({ bots: { a: "a2", b: "b1" }, final: null, confirm: false });
     expect(latestKeys(items.slice(0, 3)).final).toBe("f1");
+  });
+
+  it("latestKeys: 마지막 사용자 메시지 이후 confirmation_required 가 있으면 확정 대기", () => {
+    const conf = { ...reply({ confirmation_required: { summary: "예약금 20,000원", action_id: "btn_1" } }), key: "c1" };
+    const user = { ...base, key: "u1", kind: "user", text: "진행해", optimistic: false } as ChatItem;
+    const fin = { ...final, text: "예약금 20,000원 결제가 필요합니다. 결제 후 예약이 확정됩니다." } as ChatItem;
+    expect(latestKeys([conf, fin]).confirm).toBe(true);
+    expect(latestKeys([conf, fin, user]).confirm).toBe(false);
+    expect(latestKeys([conf, user, reply({}), fin]).confirm).toBe(false);
+    expect(latestKeys([{ ...conf, ok: false }, fin]).confirm).toBe(false);
+  });
+
+  it("문구가 확정 질문이 아니어도 확정 대기면 [진행]을 붙인다(P1-6 관찰)", () => {
+    const onSend = vi.fn();
+    render(<Final item={{ ...final, text: "예약금 20,000원 결제가 필요합니다. 말씀해 주시면 바로 확정하겠습니다." }} confirmPending onSend={onSend} />);
+    fireEvent.click(screen.getByRole("button", { name: "진행" }));
+    expect(onSend).toHaveBeenCalledWith("진행해");
+  });
+
+  it("확정 대기여도 지난 정리에는 버튼이 없다", () => {
+    render(<Final item={{ ...final, text: "결제가 필요합니다." }} confirmPending latest={false} onSend={vi.fn()} />);
+    expect(screen.queryByTestId("final-actions")).toBeNull();
   });
 });
