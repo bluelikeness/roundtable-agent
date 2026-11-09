@@ -1,5 +1,6 @@
-/* 데스크톱 레이아웃만. 모바일·다크 모드는 P1-6 */
+/* 색은 전부 토큰. 다크 모드는 시스템 설정을 따른다 (docs/05-ui.md 7장) */
 :root {
+  color-scheme: light dark;
   --bg: #ffffff;
   --bg-soft: #f6f7f9;
   --fg: #1d2129;
@@ -9,10 +10,36 @@
   --accent-soft: #eef2ff;
   --warn: #c2410c;
   --warn-soft: #fff4ed;
+  --ok: #2e9d6b;
+  --caution: #d4a017;
+  --down: #c0392b;
+  --off: #a0a6b0;
+  --shadow: rgb(0 0 0 / 0.08);
+  --scrim: rgb(0 0 0 / 0.35);
   font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   font-size: 15px;
   color: var(--fg);
   background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --bg-soft: #1e2128;
+    --fg: #e6e8eb;
+    --muted: #9aa1ad;
+    --line: #2e323b;
+    --accent: #7c9cff;
+    --accent-soft: #1f2a4a;
+    --warn: #ff9a62;
+    --warn-soft: #3a2418;
+    --ok: #4cc38a;
+    --caution: #e8c14a;
+    --down: #ff6b5e;
+    --off: #6b7280;
+    --shadow: rgb(0 0 0 / 0.4);
+    --scrim: rgb(0 0 0 / 0.55);
+  }
 }
 
 * {
@@ -33,6 +60,7 @@ button {
 .btn {
   border: 1px solid var(--line);
   background: var(--bg);
+  color: var(--fg);
   border-radius: 8px;
   padding: 8px 14px;
 }
@@ -96,6 +124,7 @@ button {
 }
 .login input {
   font: inherit;
+  background: var(--bg);
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -107,31 +136,37 @@ button {
   font-size: 13px;
 }
 
-/* 레이아웃: 세션 목록 240px | 대화 */
+/* 레이아웃: 세션 목록 240px | 대화 | 봇 상태 260px (둘 다 접기 가능) */
 .layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 240px minmax(0, 1fr) 260px;
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
-.layout.collapsed {
-  grid-template-columns: 36px 1fr;
+.layout.sessions-collapsed {
+  grid-template-columns: 36px minmax(0, 1fr) 260px;
+}
+.layout.bots-collapsed {
+  grid-template-columns: 240px minmax(0, 1fr) 36px;
+}
+.layout.sessions-collapsed.bots-collapsed {
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+}
+.layout.mobile {
+  display: flex;
+  flex-direction: column;
 }
 .expand {
   align-self: start;
   margin: 12px 4px;
 }
 .account {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
   font-size: 13px;
-  width: 216px;
+  padding: 10px 12px;
   display: flex;
   justify-content: space-between;
-}
-.layout.collapsed .account {
-  display: none;
+  border-top: 1px solid var(--line);
 }
 
 /* 세션 목록 */
@@ -141,7 +176,6 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding-bottom: 36px;
 }
 .sessions-head {
   display: flex;
@@ -181,6 +215,8 @@ button {
   flex: 1;
   min-width: 0;
   font: inherit;
+  color: var(--fg);
+  background: var(--bg);
 }
 .session-time {
   color: var(--muted);
@@ -209,7 +245,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  box-shadow: 0 4px 16px var(--shadow);
   display: flex;
   flex-direction: column;
   min-width: 110px;
@@ -217,6 +253,8 @@ button {
 .menu button {
   border: 0;
   background: none;
+  color: var(--fg);
+  white-space: nowrap;
   text-align: left;
   padding: 8px 12px;
 }
@@ -288,6 +326,14 @@ button {
 }
 .row.center {
   justify-content: center;
+}
+.row.column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.row.column > .bubble {
+  max-width: 78%;
 }
 
 .bubble {
@@ -413,6 +459,8 @@ button {
   flex: 1;
   resize: none;
   font: inherit;
+  color: var(--fg);
+  background: var(--bg);
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -429,7 +477,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 10px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  box-shadow: 0 4px 16px var(--shadow);
   min-width: 280px;
   z-index: 5;
 }
@@ -444,4 +492,487 @@ button {
 }
 .suggest li.active {
   background: var(--accent-soft);
+}
+
+.raw a,
+.links a {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+/* structured (docs/05-ui.md 3장) */
+.structured {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  border: 1.5px solid;
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 13px;
+}
+.chip.gray {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.links {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+.cards {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.card {
+  flex: 0 0 200px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  text-decoration: none;
+  overflow: hidden;
+  font-size: 13px;
+}
+.card img {
+  width: 100%;
+  height: 100px;
+  object-fit: cover;
+  display: block;
+}
+.card-text {
+  padding: 8px 10px;
+}
+.card-title {
+  font-weight: 600;
+}
+.card-body {
+  margin-top: 4px;
+}
+.images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 6px;
+  min-width: 200px;
+}
+.thumb {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-soft);
+  aspect-ratio: 1;
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  cursor: zoom-out;
+}
+.lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  min-width: 120px;
+  min-height: 120px;
+  background: var(--bg);
+}
+.confirm-box {
+  max-width: 78%;
+  border: 1.5px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.confirm-summary {
+  font-weight: 600;
+}
+.confirm-note {
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+.final-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.bubble.bot-error .btn {
+  margin-top: 6px;
+}
+
+/* 봇 상태 패널 (docs/05-ui.md 4장) */
+.bot-panel {
+  border-left: 1px solid var(--line);
+  background: var(--bg-soft);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 12px 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.bot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+}
+.bot-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.bot-row.tone-warn,
+.bot-row.tone-down {
+  background: var(--warn-soft);
+}
+.dot,
+.hdot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--off);
+}
+.dot {
+  margin-top: 6px;
+}
+.dot.ok {
+  background: var(--ok);
+}
+.dot.warn,
+.hdot.warn {
+  background: var(--caution);
+}
+.dot.down,
+.hdot.down {
+  background: var(--down);
+}
+.bot-text {
+  flex: 1;
+  min-width: 0;
+}
+.bot-line {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  align-items: baseline;
+}
+.bot-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bot-state {
+  white-space: nowrap;
+}
+.bot-state {
+  font-size: 13px;
+}
+.tone-warn .bot-state,
+.tone-down .bot-state {
+  color: var(--warn);
+}
+.bot-sub {
+  font-size: 12px;
+}
+.bot-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.bot-actions .menu {
+  top: 26px;
+  right: 0;
+}
+.claude-section {
+  margin: auto 12px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.claude-section.down {
+  color: var(--down);
+}
+.claude-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+code {
+  font-size: 12px;
+  background: var(--bg-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* 시트·드로어·바텀시트 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--scrim);
+  display: flex;
+}
+.overlay.side {
+  justify-content: flex-end;
+}
+.overlay.bottom {
+  align-items: flex-end;
+}
+.sheet {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 8px 32px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  max-height: 100%;
+}
+.sheet.side {
+  width: min(420px, 100%);
+  height: 100%;
+  animation: slide-left 0.18s ease-out;
+}
+.sheet.drawer {
+  width: min(300px, 86vw);
+  height: 100%;
+  animation: slide-right 0.18s ease-out;
+}
+.sheet.bottom {
+  width: 100%;
+  max-height: 80vh;
+  max-height: 80dvh;
+  border-radius: 14px 14px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: slide-up 0.18s ease-out;
+}
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+.sheet-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sheet.drawer .sheet-body {
+  padding: 0;
+}
+.sheet.drawer .sessions {
+  border-right: 0;
+  height: 100%;
+}
+.sheet.drawer .sessions-head .icon {
+  display: none;
+}
+@keyframes slide-left {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes slide-right {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.login-form p {
+  margin: 0;
+}
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.login-form input {
+  font: inherit;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--fg);
+  background: var(--bg);
+}
+.vnc-login {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vnc-login p {
+  margin: 0;
+}
+.vnc-frame {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 60vh;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.vnc-frame.placeholder {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  color: var(--muted);
+  background: var(--bg-soft);
+  font-size: 13px;
+}
+.login-done {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.logs {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.logs th,
+.logs td {
+  border-bottom: 1px solid var(--line);
+  padding: 3px 4px;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* 모바일 헤더: 세션 버튼 · 상태 점 */
+.menu-btn {
+  font-size: 18px;
+  padding: 2px 6px;
+}
+.status-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 5px 8px;
+  position: relative;
+}
+.bang {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--down);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* 모바일 (≤ 768px): 대화만 전체 화면 (docs/05-ui.md 7장) */
+@media (max-width: 768px) {
+  .run-header {
+    padding: 8px 10px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    gap: 8px;
+  }
+  .run-header .title {
+    max-width: 40vw;
+  }
+  .run-header .status {
+    font-size: 12px;
+  }
+  .messages-inner {
+    padding: 12px 10px;
+  }
+  .bubble,
+  .row.column > .bubble,
+  .confirm-box {
+    max-width: 92%;
+  }
+  /* 입력창은 키보드 위에 고정, safe-area 패딩 */
+  .composer-area {
+    padding: 6px 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    position: sticky;
+    bottom: 0;
+    background: var(--bg);
+  }
+  .composer textarea {
+    min-height: 42px;
+  }
+  /* 카드는 세로 스택 */
+  .cards {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+  .card {
+    flex: 1 1 auto;
+    display: flex;
+  }
+  .card img {
+    width: 88px;
+    height: auto;
+    min-height: 72px;
+  }
+  .sheet.side {
+    width: 100%;
+  }
+  .claude-section {
+    margin: 12px 0 0;
+  }
 }

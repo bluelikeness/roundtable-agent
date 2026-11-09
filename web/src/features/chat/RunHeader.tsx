@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { WsStatus } from "../../api/ws";
 import { headerStatus, type ChatState } from "../../store/chat";
 
@@ -7,6 +8,8 @@ interface Props {
   ws: WsStatus;
   model: string | null;
   onStop: (runId: string) => void;
+  leading?: ReactNode;
+  trailing?: ReactNode;
 }
 
 export function statusText(chat: ChatState | null): string {
@@ -37,11 +40,12 @@ const WS_TEXT: Record<WsStatus, string> = {
   rejected: "연결 거부됨",
 };
 
-export function RunHeader({ title, chat, ws, model, onStop }: Props) {
+export function RunHeader({ title, chat, ws, model, onStop, leading, trailing }: Props) {
   const status = statusText(chat);
   const current = chat?.runs.current ?? null;
   return (
     <header className="run-header">
+      {leading}
       <div className="title" title={title}>
         {title}
       </div>
@@ -55,6 +59,7 @@ export function RunHeader({ title, chat, ws, model, onStop }: Props) {
           중단
         </button>
       )}
+      {trailing}
     </header>
   );
 }

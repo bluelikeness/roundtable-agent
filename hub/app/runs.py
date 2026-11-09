@@ -86,6 +86,10 @@ class RunManager:
         self.settings = settings
         runner.on_tool_call = self._record_tool_call
         self._sessions: dict[uuid.UUID, _SessionState] = {}
+        # 세션 무관 이벤트(bot.status)를 받는 모든 연결
+        self._conns: set[Connection] = set()
+        # /restart 요청: 다음 실행을 새 Claude 세션으로(force_new). 허브가 재시작되면 사라진다
+        self._force_new: set[uuid.UUID] = set()
 
     def _state(self, sid: uuid.UUID) -> _SessionState:
         return self._sessions.setdefault(sid, _SessionState())
@@ -115,7 +119,27 @@ class RunManager:
         while tasks := [st.worker for st in self._sessions.values() if st.worker is not None]:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    # --- 구독 ---
+    # --- 연결·구독 ---
+
+    def connect(self, conn: Connection) -> None:
+        self._conns.add(conn)
+
+    def disconnect(self, conn: Connection) -> None:
+        self._conns.discard(conn)
+        self.unsubscribe(conn)
+
+    def broadcast_global(self, ev: HubEvent) -> None:
+        """세션 무관 이벤트(bot.status). seq 가 없어 재전송 버퍼에 넣지 않는다."""
+        data = ev.model_dump_json()
+        for conn in list(self._conns):
+            conn.push(data)
+
+    def request_restart(self, sid: uuid.UUID) -> None:
+        """/restart: 다음 실행이 새 Claude 세션으로 시작하게 한다(요약 주입은 러너가 한다)."""
+        self._force_new.add(sid)
+
+    def restart_pending(self, sid: uuid.UUID) -> bool:
+        return sid in self._force_new
 
     async def subscribe(self, conn: Connection, sid: uuid.UUID, since_seq: int) -> bool:
         async with self._sm() as db:
@@ -306,6 +330,8 @@ class RunManager:
             )
         ).all()
         bots = await available_endpoints(db, load_bots(self.settings.bots_file))
+        force_new = s.id in self._force_new
+        self._force_new.discard(s.id)
         return RunnerSession(
             session_id=s.id,
             run_id=run.id,
@@ -316,6 +342,7 @@ class RunManager:
             last_bot_raws={name: raw for name, raw in bot_rows if name},
             bots=bots,
             model=q.model or "sonnet",
+            force_new=force_new,
         )
 
     async def _persist(self, sid: uuid.UUID, run_id: uuid.UUID, ev: HubEvent) -> HubEvent | None:

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     adapter_token_file: str = "/run/secrets/hub_adapter_token"
     # 봇 등록 파일(03 10장). 실행마다 다시 읽는다
     bots_file: str = str(Path(__file__).resolve().parents[1] / "bots.yaml")
+    # 어댑터 헬스체크 폴링 간격(03 5장: 30초). 0 이면 폴링하지 않는다(테스트)
+    health_interval_s: float = 30
+    # "오늘" 실행 횟수·토큰을 셀 때의 UTC 오프셋(시간). 봇 상태 패널 Claude Code 섹션. 기본 KST
+    day_utc_offset_h: int = 9
 
     def read_adapter_token(self) -> str:
         if self.adapter_token:

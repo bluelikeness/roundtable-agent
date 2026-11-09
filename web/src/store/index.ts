@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { api, HttpError } from "../api/rest";
-import type { BotInfo, BotStatusPayload, HubEvent, SessionOut } from "../api/types";
+import type { BotInfo, BotStatusPayload, ClaudeStatus, HubEvent, SessionOut } from "../api/types";
 import { HubSocket, type WsStatus } from "../api/ws";
 import { addOptimisticUser, applyEvent, emptyChat, loadMessages, type ChatState } from "./chat";
 
@@ -17,6 +17,19 @@ export interface Notice {
   tone: "info" | "warn";
 }
 
+/** 봇 패널에서 여는 시트 (docs/05-ui.md 4장) */
+export type Sheet = { kind: "login"; bot: string } | { kind: "logs"; bot: string };
+
+export interface UiState {
+  /** 모바일: 세션 목록 드로어 */
+  drawer: boolean;
+  /** 모바일: 봇 상태 바텀시트 */
+  botSheet: boolean;
+  /** 데스크톱: 봇 상태 패널 접힘 */
+  botPanelCollapsed: boolean;
+  sheet: Sheet | null;
+}
+
 export interface AppState {
   auth: AuthState;
   username: string | null;
@@ -27,6 +40,9 @@ export interface AppState {
   /** 허브 봇 목록(GET /api/bots, bots.yaml 순서) */
   bots: BotInfo[];
   botStatus: Record<string, BotStatusPayload>;
+  /** 봇 상태 패널 하단 Claude Code 섹션 */
+  claude: ClaudeStatus | null;
+  ui: UiState;
   ws: WsStatus;
   notice: Notice | null;
   /** 세션별 모델(/model). 허브에 저장할 곳이 없어 이 브라우저에만 둔다 */
@@ -60,6 +76,8 @@ export const useStore = create<AppState>(() => ({
   chats: {},
   bots: [],
   botStatus: {},
+  claude: null,
+  ui: { drawer: false, botSheet: false, botPanelCollapsed: false, sheet: null },
   ws: "closed",
   notice: null,
   models: readModels(),
@@ -112,6 +130,7 @@ function handleEvent(ev: HubEvent) {
   if (!sid) return;
   updateChat(sid, (c) => applyEvent(c, ev));
   if (ev.type === "message.ack") touchSession(sid, ev.ts);
+  if (ev.type === "run.finished") void loadClaudeStatus();
 }
 
 function touchSession(sid: string, ts: string) {
@@ -181,7 +200,7 @@ export async function checkAuth() {
 export function logoutLocal() {
   socket?.stop();
   socket = null;
-  set({ auth: "anon", username: null, chats: {}, sessions: [], ws: "closed" });
+  set({ auth: "anon", username: null, chats: {}, sessions: [], ws: "closed", botStatus: {}, claude: null });
 }
 
 export async function login(username: string, password: string, totp: string) {
@@ -199,7 +218,7 @@ export async function logout() {
 }
 
 async function afterLogin() {
-  await Promise.all([loadSessions(), loadBots()]);
+  await Promise.all([loadSessions(), loadBots(), loadClaudeStatus()]);
   const fromHash = sessionFromHash();
   set({ activeId: fromHash && get().sessions.some((s) => s.id === fromHash) ? fromHash : null });
   writeHash(get().activeId);
@@ -222,9 +241,98 @@ export async function loadBots() {
   }
 }
 
+export async function loadClaudeStatus() {
+  try {
+    set({ claude: await api.claudeStatus() });
+  } catch {
+    // 패널 보조 정보. 실패해도 알리지 않는다
+  }
+}
+
+// --- 화면(드로어·시트) ---
+
+export function setUi(patch: Partial<UiState>) {
+  set((s) => ({ ui: { ...s.ui, ...patch } }));
+}
+
+export function openSheet(sheet: Sheet) {
+  // 바텀시트 위에 겹쳐 열지 않는다(Esc 한 번에 둘 다 닫히는 것을 막는다)
+  setUi({ sheet, botSheet: false });
+}
+
+export function closeSheet() {
+  setUi({ sheet: null });
+}
+
+// --- 봇 관리 (허브가 어댑터 관리 HTTP 를 대신 부른다) ---
+
+function knownBot(name: string): boolean {
+  return get().bots.some((b) => b.name === name);
+}
+
+function putStatus(p: BotStatusPayload) {
+  set((s) => ({ botStatus: { ...s.botStatus, [p.bot]: p } }));
+}
+
+export async function probeBot(bot: string) {
+  try {
+    putStatus(await api.probeBot(bot));
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+export async function setBotEnabled(bot: string, enabled: boolean) {
+  try {
+    putStatus(await api.setBotEnabled(bot, enabled));
+    notify(`${bot} ${enabled ? "활성화" : "비활성화"}`);
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+/** /reset <봇>: 현재 세션의 그 봇 대화만 초기화. 새 세션(아직 DB 에 없음)이면 할 것이 없다 */
+export async function resetBot(bot: string): Promise<boolean> {
+  if (!knownBot(bot)) {
+    notify(`알 수 없는 봇: ${bot}`, "warn");
+    return false;
+  }
+  const sid = get().activeId;
+  if (!sid) {
+    notify("이 세션에는 아직 봇 대화가 없습니다");
+    return true;
+  }
+  try {
+    await api.resetBot(bot, sid);
+    notify(`${bot} 대화를 초기화했습니다. 다음 질문부터 새 대화로 시작합니다`);
+    return true;
+  } catch (e) {
+    notify(errorText(e), "warn");
+    return false;
+  }
+}
+
+/** /restart: 다음 실행부터 새 Claude Code 세션(이전 대화 요약을 넘긴다) */
+export async function restartClaude(): Promise<boolean> {
+  const sid = get().activeId;
+  if (!sid) {
+    notify("새 세션입니다. 첫 메시지가 새 Claude 세션으로 시작합니다");
+    return true;
+  }
+  try {
+    await api.restartSession(sid);
+    notify("다음 메시지부터 새 Claude 세션으로 시작합니다");
+    return true;
+  } catch (e) {
+    notify(errorText(e), "warn");
+    return false;
+  }
+}
+
 // --- 세션 ---
 
 export function openSession(sid: string | null) {
+  if (get().ui.drawer) setUi({ drawer: false });
   if (get().activeId === sid) return;
   set({ activeId: sid });
   writeHash(sid);

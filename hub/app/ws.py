@@ -62,6 +62,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     manager: RunManager = websocket.app.state.run_manager
     await websocket.accept()
     conn = Connection()
+    manager.connect(conn)
+    # 봇 상태 패널은 폴링하지 않는다: 연결할 때 현재 상태를 한 번 보내고 이후 바뀔 때만 보낸다
+    monitor = getattr(websocket.app.state, "bot_monitor", None)
+    if monitor is not None:
+        for ev in monitor.snapshot():
+            conn.push(ev.model_dump_json())
 
     async def pump() -> None:
         while True:
@@ -84,7 +90,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        manager.unsubscribe(conn)
+        manager.disconnect(conn)
         sender.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await sender

@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import router
+from app.bot_monitor import BotMonitor
+from app.bots_api import internal as internal_router
+from app.bots_api import router as bots_router
 from app.config import get_settings
 from app.db import dispose_engine, get_sessionmaker
 from app.runner_client import RemoteRunner
@@ -22,9 +25,13 @@ async def lifespan(app: FastAPI):
     manager = RunManager(get_sessionmaker(), runner, settings)
     await manager.recover()
     app.state.run_manager = manager
+    monitor = BotMonitor(get_sessionmaker(), settings, manager.broadcast_global)
+    await monitor.start()
+    app.state.bot_monitor = monitor
     try:
         yield
     finally:
+        await monitor.aclose()
         await manager.shutdown()
         if isinstance(runner, RemoteRunner):
             await runner.aclose()
@@ -34,6 +41,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="multibot hub", lifespan=lifespan)
 app.include_router(router)
 app.include_router(ws_router)
+app.include_router(bots_router)
+app.include_router(internal_router)
 
 
 @app.get("/healthz")
