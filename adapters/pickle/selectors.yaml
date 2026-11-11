@@ -1,0 +1,24 @@
+# 피클 앱(com.pickle.client) 셀렉터. 앱이 바뀌면 이 파일만 고친다(adapters/phonechat.py 키 설명).
+# 기준: 실기기 측정(2026-11-11, 멀티봇 시험기) + P0 에뮬레이터. Compose UI 라 resource-id 가 없다.
+input: {cls: EditText}
+input_u2: {className: android.widget.EditText}
+# 입력하면 나타나는 전송 버튼. 실기기 한국어 UI "보내기"
+send: {desc_re: '^(보내기|Send|Send message)$'}
+# 입력 중 입력줄이 트리에서 사라져 전송 버튼이 안 보이면 키보드 바로 위 오른쪽 끝을 누른다(에뮬레이터 1.1.16)
+send_fallback: keyboard_right
+# 전송 버튼은 입력창에 글이 있을 때만 보인다. 누른 뒤 사라지면 전송된 것(그 자리는 음성 버튼)
+send_only_with_text: true
+# 휴대폰에서는 전송 버튼을 좌표 탭이 아니라 접근성 클릭으로 누른다(uiautomator2 셀렉터 키)
+send_u2: {descriptionMatches: '^(보내기|Send|Send message)$'}
+# 입력창이 없으면(다른 탭) 하단 채팅 탭을 누른다
+chat_tabs:
+  - {desc_re: '^(Chat|채팅)$'}
+# 시각, 읽음 표시("방금 읽음"·"3분 전 읽음"·Read·Seen)는 답이 아니다(2026-11-11 실기기: 피클 "방금 읽음"을 답으로 오인)
+exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*[AaPp][Mm])?\s*$|^\s*((방금|\d+\s*(초|분|시간)\s*전)\s*)?읽음\s*$|^(Read|Seen)\b'
+exclude_button_re: '^(Voice chat|Dictate|Add attachment|Menu|Invite friends|보내기|음성|첨부)$'
+confirm_button_re: '(결제|구매|예약 확정|확정|Pay|Confirm)'
+login_markers:
+  - Continue with Google
+  - Google로 계속하기
+  - Sign in
+  - 로그인

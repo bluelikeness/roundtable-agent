@@ -71,10 +71,11 @@ services:
     restart: unless-stopped
 
   web:
-    # 웹 UI(Vite 빌드) + /api·/ws 를 허브로 프록시
+    # 웹 UI(Vite 빌드) + /api·/ws 를 허브로, /phone/ws 를 폰 게이트웨이로 프록시
     build: ./web
     depends_on:
       - hub-api
+      - phone-gateway
     restart: unless-stopped
 
   # 허브·러너를 실제 봇 없이 검증하는 가짜 봇 3개. MCP 9000, 관리 HTTP 9100 (내부망)
@@ -102,37 +103,91 @@ services:
     volumes:
       - mock-c-data:/data
 
-  # Vooy 어댑터 (docs/03-adapters.md 7장). 실봇이라 기본 기동에서 빠진다: docker compose --profile vooy up -d vooy
-  # 에뮬레이터(전용 AVD "vooy")와 adb 서버는 컨테이너 밖에 있다. adb 서버 주소로 붙는다(adapters/vooy/README.md).
-  vooy:
-    profiles: ["vooy"]
+  # 폰 게이트웨이 (docs/proposals/phone-worker.md, ADR-9). 휴대폰 워커 앱이 web(nginx)의 /phone/ws 를 거쳐
+  # 바깥에서 붙는다(기기 토큰). 어댑터는 내부망 9200 으로 화면 임대·명령·알림을 쓴다(허브 토큰).
+  phone-gateway:
     build:
       context: ./adapters
       dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.phone"]
     environment:
-      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
-      ANDROID_SERIAL: ${VOOY_ANDROID_SERIAL:-emulator-5554}
-      ANDROID_ADB_SERVER_HOST: ${VOOY_ADB_SERVER_HOST:-host.docker.internal}
-      ANDROID_ADB_SERVER_PORT: ${VOOY_ADB_SERVER_PORT:-5037}
-      ANDROID_VNC_URL: ${VOOY_VNC_URL:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura,ai.manus.agents
+      PHONE_APK_DIR: /srv/phone-dist
     secrets:
       - hub_adapter_token
+      - phone_device_token
     volumes:
-      # 스레드 핸들·하루 전송 수·이미지. 앱 로그인 상태는 여기 없다(AVD 디스크에 있다)
-      - vooy-data:/data
+      # 워커 앱 배포본(phone/release.sh 가 만든다, 레포에 넣지 않음). 자동 업데이트·QR 설치에 쓴다
+      - ./phone/dist:/srv/phone-dist:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9200/state', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
+  # 실봇 어댑터 3개 (docs/03-adapters.md 7~9장). 사용자 휴대폰의 앱을 폰 게이트웨이 경유로 조종한다.
+  # 휴대폰이 연결돼 있지 않거나 잠겨 있으면 available=false(backend_down)로 보고한다.
+  vooy:
+    <<: &phone-adapter
+      build:
+        context: ./adapters
+        dockerfile: vooy/Dockerfile
+      secrets:
+        - hub_adapter_token
+      depends_on:
+        - phone-gateway
+      healthcheck:
+        test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+        interval: 5s
+        timeout: 3s
+        retries: 20
+      restart: unless-stopped
+    environment:
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://phone-gateway:9200
+    volumes:
+      # 스레드 핸들·하루 전송 수·이미지. 앱 로그인 상태는 휴대폰에 있다
+      - vooy-data:/data
+
+  pickle:
+    <<: *phone-adapter
+    command: ["python", "-m", "adapters.pickle"]
+    environment:
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://phone-gateway:9200
+    volumes:
+      - pickle-data:/data
+
+  muse:
+    <<: *phone-adapter
+    command: ["python", "-m", "adapters.muse"]
+    environment:
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://phone-gateway:9200
+    volumes:
+      - muse-data:/data
+
+  cue:
+    <<: *phone-adapter
+    command: ["python", "-m", "adapters.cue"]
+    environment:
+      HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://phone-gateway:9200
+    volumes:
+      - cue-data:/data
+
 # 허브↔어댑터·러너 공유 토큰(X-Hub-Token). 값은 .env 의 HUB_ADAPTER_TOKEN
 secrets:
   hub_adapter_token:
     environment: HUB_ADAPTER_TOKEN
+  # 휴대폰 워커 기기 토큰. 값은 .env 의 PHONE_DEVICE_TOKEN
+  phone_device_token:
+    environment: PHONE_DEVICE_TOKEN
 
 volumes:
   pgdata:
@@ -141,3 +196,6 @@ volumes:
   mock-b-data:
   mock-c-data:
   vooy-data:
+  pickle-data:
+  muse-data:
+  cue-data:

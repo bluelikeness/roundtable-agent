@@ -17,3 +17,15 @@ bots:
     mcp_url: http://vooy:9000/mcp
     admin_url: http://vooy:9100
     aliases: [부이]
+  - name: pickle
+    mcp_url: http://pickle:9000/mcp
+    admin_url: http://pickle:9100
+    aliases: [피클]
+  - name: muse
+    mcp_url: http://muse:9000/mcp
+    admin_url: http://muse:9100
+    aliases: [뮤즈]
+  - name: cue
+    mcp_url: http://cue:9000/mcp
+    admin_url: http://cue:9100
+    aliases: [큐]

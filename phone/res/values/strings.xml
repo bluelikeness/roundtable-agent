@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">멀티봇 허브의 요청이 있을 때 Vooy·피클·뮤즈 앱을 열어 질문을 입력·전송하고 답을 읽습니다. 메시지 내용은 사용자의 허브로만 보내고 이 앱에는 저장하지 않습니다.</string>
+</resources>

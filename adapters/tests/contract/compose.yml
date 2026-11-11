@@ -42,17 +42,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-  # 휴대폰 워커 경로(docs/proposals/phone-worker.md): 게이트웨이 + 가짜 휴대폰 + 휴대폰 경유 Vooy 어댑터.
-  # 가짜 휴대폰이 실제 WebSocket 으로 게이트웨이에 붙고, 어댑터는 PhoneDevice 로 게이트웨이를 거친다.
-  # 기기 토큰은 테스트 전용 값이다(실제 기기 토큰 아님)
-  phone-gateway:
+  # 휴대폰 워커 경로(docs/proposals/phone-worker.md): 봇마다 게이트웨이 + 가짜 휴대폰 + PhoneDevice 경유 어댑터.
+  # 계약은 어댑터 하나씩 보므로 가짜 휴대폰을 봇마다 따로 둔다(한 휴대폰을 세 봇이 나눠 쓰는 동작은
+  # 단위 테스트 test_three_bots_share_one_phone 이 본다). 기기 토큰은 테스트 전용 값이다(실제 기기 토큰 아님).
+  test-phone-gateway:
     build:
       context: ./adapters
       dockerfile: vooy/Dockerfile
     command: ["python", "-m", "adapters.phone"]
     environment:
       PHONE_DEVICE_TOKEN: contract-test-device-token
-      PHONE_WATCH_PKGS: com.vooy.mobile
+      PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura
     secrets:
       - hub_adapter_token
     healthcheck:
@@ -66,14 +66,15 @@ services:
       dockerfile: vooy/Dockerfile
     command: ["python", "-m", "adapters.testing.fake_phone"]
     environment:
-      PHONE_GATEWAY_WS: ws://phone-gateway:9200/phone/ws
+      PHONE_GATEWAY_WS: ws://test-phone-gateway:9200/phone/ws
       PHONE_DEVICE_TOKEN: contract-test-device-token
       FAKE_VOOY_DIR: /data/fake-vooy
       FAKE_PHONE_LOCKED: /data/locked
+      FAKE_PHONE_DIR: /data
     volumes:
       - fake-phone-data:/data
     depends_on:
-      phone-gateway:
+      test-phone-gateway:
         condition: service_healthy
   vooy-phone:
     build:
@@ -83,7 +84,7 @@ services:
       ADAPTER_NAME: vooy-phone
       HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
       ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
-      PHONE_GATEWAY_URL: http://phone-gateway:9200
+      PHONE_GATEWAY_URL: http://test-phone-gateway:9200
     secrets:
       - hub_adapter_token
     volumes:
@@ -98,11 +99,125 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  test-phone-gateway-pickle:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.phone"]
+    environment:
+      PHONE_DEVICE_TOKEN: contract-test-device-token
+      PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura
+    secrets:
+      - hub_adapter_token
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9200/state', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  fake-phone-pickle:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.testing.fake_phone"]
+    environment:
+      PHONE_GATEWAY_WS: ws://test-phone-gateway-pickle:9200/phone/ws
+      PHONE_DEVICE_TOKEN: contract-test-device-token
+      FAKE_VOOY_DIR: /data/fake-vooy
+      FAKE_PHONE_LOCKED: /data/locked
+      FAKE_PHONE_DIR: /data
+    volumes:
+      - fake-phone-pickle-data:/data
+    depends_on:
+      test-phone-gateway-pickle:
+        condition: service_healthy
+  pickle-phone:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.pickle"]
+    environment:
+      ADAPTER_NAME: pickle-phone
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://test-phone-gateway-pickle:9200
+    secrets:
+      - hub_adapter_token
+    volumes:
+      - pickle-phone-data:/data
+    ports:
+      - "127.0.0.1:9009:9000"
+      - "127.0.0.1:9109:9100"
+    depends_on:
+      - fake-phone-pickle
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  test-phone-gateway-muse:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.phone"]
+    environment:
+      PHONE_DEVICE_TOKEN: contract-test-device-token
+      PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura
+    secrets:
+      - hub_adapter_token
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9200/state', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  fake-phone-muse:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.testing.fake_phone"]
+    environment:
+      PHONE_GATEWAY_WS: ws://test-phone-gateway-muse:9200/phone/ws
+      PHONE_DEVICE_TOKEN: contract-test-device-token
+      FAKE_VOOY_DIR: /data/fake-vooy
+      FAKE_PHONE_LOCKED: /data/locked
+      FAKE_PHONE_DIR: /data
+    volumes:
+      - fake-phone-muse-data:/data
+    depends_on:
+      test-phone-gateway-muse:
+        condition: service_healthy
+  muse-phone:
+    build:
+      context: ./adapters
+      dockerfile: vooy/Dockerfile
+    command: ["python", "-m", "adapters.muse"]
+    environment:
+      ADAPTER_NAME: muse-phone
+      HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
+      ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
+      PHONE_GATEWAY_URL: http://test-phone-gateway-muse:9200
+    secrets:
+      - hub_adapter_token
+    volumes:
+      - muse-phone-data:/data
+    ports:
+      - "127.0.0.1:9010:9000"
+      - "127.0.0.1:9110:9100"
+    depends_on:
+      - fake-phone-muse
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://localhost:9100/health', headers={'X-Hub-Token': open('/run/secrets/hub_adapter_token').read().strip()}))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   vooy:
     environment:
       HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
 
 volumes:
   vooy-fake-data:
-  fake-phone-data:
   vooy-phone-data:
+  pickle-phone-data:
+  muse-phone-data:
+  fake-phone-data:
+  fake-phone-pickle-data:
+  fake-phone-muse-data:

@@ -188,6 +188,7 @@ adapters/
   base.py            # BotAdapter, AskResult, Structured, Thread, serve()
   android_base.py    # 접근성 트리·한글 입력·휴대폰 경로 흐름 (Vooy·피클·뮤즈 공통)
   phone/             # 폰 게이트웨이(gateway.py), PhoneDevice(device.py), 휴대폰 명령 규약(protocol.py)
+  phonechat.py       # 범용 채팅 앱 어댑터(피클·뮤즈). 앱별 차이는 <bot>/selectors.yaml·config.yaml
   mcp_server.py      # ask/status 툴 등록, streamable HTTP
   admin_api.py       # 관리 HTTP
   vooy/  {adapter.py, config.yaml, Dockerfile}
@@ -225,7 +226,7 @@ adapters/
 
 ## 8. 뮤즈 어댑터
 
-> **ADR-9(2026-11-11)**: muse.ai 웹·Playwright·VPN 대신 휴대폰의 Meta AI 앱(`com.facebook.aura`)을 7장과 같은 휴대폰 경로로 조종한다. 실측: 입력창 `hatch-message-input`, 전송 `hatch-send-button`, 작업 중 알림 채널 `aura_run_in_background`이 사라지고 `aura_conversations` 답 알림이 오면 응답 끝. 아래 웹 설계는 이력으로 남긴다(W3에서 교체).
+> **ADR-9(2026-11-11)**: muse.ai 웹·Playwright·VPN 대신 휴대폰의 Meta AI 앱(`com.facebook.aura`)을 7장과 같은 휴대폰 경로로 조종한다. 실측: 입력창 `hatch-message-input`, 전송 `hatch-send-button`, 작업 중 알림 채널 `aura_run_in_background`이 사라지고 `aura_conversations` 답 알림이 오면 응답 끝. 아래 웹 설계는 이력으로 남긴다. 구현: `adapters/phonechat.py`(범용 채팅 앱 어댑터) + `adapters/muse/`(config·selectors).
 
 muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정적이고 서버에 에뮬레이터가 필요 없다. 지역 제약은 컨테이너 egress를 VPN으로 돌려 푼다.
 
@@ -249,7 +250,7 @@ muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정�
 
 ## 9. 피클 어댑터
 
-> **ADR-9(2026-11-11)**: 에뮬레이터·전용 AVD·스냅샷 대신 휴대폰의 피클 앱을 7장과 같은 휴대폰 경로로 조종한다. 실측: 휴대폰에서는 입력창에 접근성 `SET_TEXT`가 바로 되고(에뮬레이터의 `send_keys` 우회 불필요) 전송 라벨은 "보내기", 답은 말풍선마다 알림 하나(`MessagingStyle`, `pickle.seq`). 아래 에뮬레이터 설계는 이력으로 남긴다(W3에서 교체).
+> **ADR-9(2026-11-11)**: 에뮬레이터·전용 AVD·스냅샷 대신 휴대폰의 피클 앱을 7장과 같은 휴대폰 경로로 조종한다. 실측: 휴대폰에서는 입력창에 접근성 `SET_TEXT`가 바로 되고(에뮬레이터의 `send_keys` 우회 불필요) 전송 라벨은 "보내기", 답은 말풍선마다 알림 하나(`MessagingStyle`, `pickle.seq`). 아래 에뮬레이터 설계는 이력으로 남긴다. 구현: `adapters/phonechat.py` + `adapters/pickle/`. 에뮬레이터 1.1.16은 입력 중 전송 버튼을 트리에 내놓지 않아 `send_fallback: keyboard_right`(입력줄 오른쪽 끝 탭)를 둔다.
 
 안드로이드 에뮬레이터 안의 피클 앱을 `android_base.py`(Vooy와 공통)로 조작한다. VM 2에서 돌고, 허브와는 WireGuard 사설망으로만 연결된다.
 

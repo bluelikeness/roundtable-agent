@@ -244,8 +244,6 @@ class FakeVooyDevice:
         # 실제 앱처럼 트리 순서는 최신이 먼저
         for m, top in rows:
             self._render_msg(x, m, top)
-        if self.typing:
-            x.leaf("android.view.ViewGroup", (42, CONV_BOTTOM - 90, 400, CONV_BOTTOM - 20), rid="agent-message-segments")
         x.close()
         x.open("android.view.ViewGroup", (42, 2040, 1038, 2183), rid="composer-input-pill")
         x.leaf("android.widget.EditText", (155, 2066, 794, 2156), desc="Message", text=self.input, clickable=True)
@@ -253,7 +251,9 @@ class FakeVooyDevice:
         self._targets.append(((925, 2067, 1014, 2156), self._send))
         self._targets.append(((155, 2066, 794, 2156), lambda: None))
         x.close()
-        x.leaf("android.view.View", (456, 2214, 624, 2361), rid="android-gnb-home", desc="vooy tab, Done", clickable=True)
+        # 응답 중에는 하단 vooy 탭 설명이 "Done" 이 아니게 바뀐다(실기기 확인값은 Done/대기 중 뿐, 응답 중 값은 흉내)
+        tab_desc = "vooy tab, Responding" if self.typing else "vooy tab, Done"
+        x.leaf("android.view.View", (456, 2214, 624, 2361), rid="android-gnb-home", desc=tab_desc, clickable=True)
         self._targets.append(((456, 2214, 624, 2361), lambda: None))
         x.close()
 

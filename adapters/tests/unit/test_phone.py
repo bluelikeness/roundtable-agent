@@ -21,6 +21,8 @@ from adapters.phone.device import PhoneDevice  # noqa: E402
 from adapters.phone.gateway import Gateway  # noqa: E402
 from adapters.testing.fake_phone import FakePhone  # noqa: E402
 from adapters.testing.fake_vooy import FakeVooyDevice  # noqa: E402
+from adapters.learned import LearnedSelectors, app_key, device_id  # noqa: E402
+from adapters.phonechat import PhoneChatAdapter, is_own  # noqa: E402
 from adapters.vooy.adapter import VooyAdapter  # noqa: E402
 
 HUB = "hub-token-for-tests"
@@ -39,12 +41,15 @@ async def stack(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_VOOY_DIR", str(tmp_path / "fake"))
     monkeypatch.setenv("FAKE_VOOY_LATENCY", "0.3")
     port = _free_port()
-    gw = Gateway(HUB, DEV, ["com.vooy.mobile"])
+    gw = Gateway(HUB, DEV, ["com.vooy.mobile", "com.pickle.client", "com.facebook.aura", "ai.manus.agents"])
     server = uvicorn.Server(uvicorn.Config(gw.app(), host="127.0.0.1", port=port, log_level="warning", ws="websockets-sansio"))
     srv_task = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.02)
-    phone = FakePhone(f"ws://127.0.0.1:{port}/phone/ws", DEV, FakeVooyDevice(), locked_file=str(tmp_path / "locked"))
+    monkeypatch.setenv("FAKE_CHAT_LATENCY", "0.3")
+    phone = FakePhone(
+        f"ws://127.0.0.1:{port}/phone/ws", DEV, FakeVooyDevice(), locked_file=str(tmp_path / "locked"), chat_dir=tmp_path / "chats"
+    )
     ph_task = asyncio.create_task(phone.run_forever())
     await asyncio.wait_for(phone.connected.wait(), 5)
     # watch 명령이 끝날 때까지
@@ -77,6 +82,16 @@ async def test_phone_ws_rejects_wrong_device_token(stack):
     with pytest.raises(Exception):
         await asyncio.wait_for(bad.run_once(), 5)
     assert gw.link is not None and gw.link.device == "fake-phone"  # 기존 연결은 그대로
+
+
+async def test_other_phone_is_turned_away_while_first_is_alive(stack):
+    """같은 토큰의 다른 휴대폰은 거절(4423)한다. 서로 밀어내며 끝없이 재연결하지 않게. 같은 휴대폰 재연결은 교체."""
+    base, gw, _ = stack
+    other = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
+    other.device_name = "other-phone"
+    with pytest.raises(Exception):
+        await asyncio.wait_for(other.run_once(), 5)
+    assert gw.link is not None and gw.link.device == "fake-phone" and not gw.link.closed
 
 
 async def test_screen_commands_need_lease(stack):
@@ -168,6 +183,7 @@ async def vooy_phone(stack, tmp_path, monkeypatch):
     a.android.app_start_wait_s = 1
     a.SEND_SETTLE_S = 0
     a.SEND_CHECK_S = 0.05
+    a.SEND_CONFIRM_S = 0.3
     yield a, gw, phone
     await a.device.aclose()
 
@@ -209,3 +225,202 @@ async def test_vooy_over_phone_fast_reply_before_home(vooy_phone):
     res = await a.ask("빠른 답", "t1", timeout_s=120)  # 대기 끝 근처 규칙(10초)에 걸리지 않게 길게
     assert res.ok and res.raw == "echo: 빠른 답"
     assert res.latency_ms < 15_000
+
+
+def _chat_adapter(bot: str, base: str, tmp_path) -> PhoneChatAdapter:
+    d = __import__(f"adapters.{bot}", fromlist=["x"]).__path__[0]
+    cfg = AdapterConfig.load(d + "/config.yaml")
+    cfg = cfg.model_copy(update={"min_interval_s": 0})
+    cfg.timeouts.quiet_s = 0.5
+    a = PhoneChatAdapter(cfg, tmp_path / f"state-{bot}", selectors_path=d + "/selectors.yaml")
+    a.device = PhoneDevice(base_url=base, token=HUB, holder=bot)
+    a.device.IDLE_RELEASE_S = 0.3
+    a.poll_s = 0.05
+    a.android.app_start_wait_s = 1
+    a.SEND_SETTLE_S = 0
+    a.SEND_CHECK_S = 0.05
+    return a
+
+
+@pytest.mark.parametrize("bot", ["pickle", "muse", "cue"])
+async def test_chat_app_over_phone(stack, tmp_path, monkeypatch, bot):
+    base, _, phone = stack
+    monkeypatch.setenv("ANDROID_DEVICE_FACTORY", "")
+    a = _chat_adapter(bot, base, tmp_path)
+    try:
+        res = await a.ask("오늘 날씨", "t1", timeout_s=60)
+        assert res.ok, res
+        assert res.raw == "echo: 오늘 날씨"
+        assert a._signaled
+        # 버튼 → [tap:]
+        res = await a.ask("[chat:buttons] 식당", "t1", timeout_s=60)
+        assert res.ok and [b["label"] for b in res.structured["buttons"]] == ["예약", "다른 곳"], res
+        aid = res.structured["buttons"][0]["action_id"]
+        res2 = await a.ask(f"[tap:{aid}]", "t1", timeout_s=60)
+        assert res2.ok and "'예약' 선택하셨습니다." in res2.raw, res2
+        # 다른 봇과 화면을 나눠 쓰고 끝나면 홈으로 나온다
+        assert phone._fg() is None
+        # Cue: 입력줄 마이크(누르면 음성 모드)는 한 번도 누르지 않았다
+        assert all(app.voice_entered == 0 for app in phone.chats.values())
+    finally:
+        await a.device.aclose()
+
+
+async def test_send_button_learned_per_device(stack, tmp_path, monkeypatch):
+    """기본 셀렉터가 안 맞는 앱 버전: 일반 규칙(글 넣은 뒤 나타난 버튼)으로 보내고, 기기별 층에 배운다."""
+    base, _, phone = stack
+    a = _chat_adapter("pickle", base, tmp_path)
+    a.sel["send"] = [{"desc": "새 버전 이름"}]  # 앱이 버튼 이름을 바꿨다고 치자
+    a.sel.pop("send_u2", None)
+    try:
+        res = await a.ask("하나", "t1", timeout_s=60)
+        assert res.ok and res.raw == "echo: 하나", res
+        key = app_key("com.pickle.client", "1.0-fake(1)", device_id("fake-phone", 34))
+        assert a.learned.get(key, "send") == {"desc": "보내기"}
+        # 다음 전송은 배운 셀렉터로
+        res = await a.ask("둘", "t1", timeout_s=60)
+        assert res.ok and res.raw == "echo: 둘", res
+        # 같은 허브의 다른 어댑터 인스턴스도 파일에서 읽는다(재시작)
+        assert LearnedSelectors(a.state_dir / "learned_selectors.json").get(key, "send") == {"desc": "보내기"}
+    finally:
+        await a.device.aclose()
+
+
+def test_learned_selectors_version_and_drop(tmp_path):
+    path = tmp_path / "learned.json"
+    s = LearnedSelectors(path)
+    old, new = app_key("a.b", "1.0"), app_key("a.b", "1.1")
+    s.put(old, "send", {"desc": "보내기"})
+    s.put(app_key("c.d", "2"), "send", {"rid": "x"})
+    assert LearnedSelectors(path).get(old, "send") == {"desc": "보내기"}
+    # 앱이 업데이트되면 그 앱의 옛 버전 기록은 버린다(다른 앱은 그대로)
+    s.put(new, "send", {"desc": "전송"})
+    s2 = LearnedSelectors(path)
+    assert s2.get(old, "send") is None and s2.get(new, "send") == {"desc": "전송"}
+    assert s2.get(app_key("c.d", "2"), "send") == {"rid": "x"}
+    s2.drop(new, "send")
+    assert LearnedSelectors(path).get(new, "send") is None
+
+
+def test_learned_selectors_are_per_device(tmp_path):
+    """같은 앱 같은 버전이라도 기기(모델·안드로이드 버전)가 다르면 따로 배운다. 한 기기의 업데이트가 다른 기기 기록을 지우지 않는다."""
+    path = tmp_path / "learned.json"
+    s = LearnedSelectors(path)
+    s10 = app_key("a.b", "1.0", device_id("samsung SM-N960N", 29))
+    s15 = app_key("a.b", "1.0", device_id("samsung SM-S938N", 35))
+    s.put(s10, "input", {"method": "focus_paste"})
+    s.put(s15, "input", {"method": "set_text"})
+    s.put(app_key("a.b", "1.1", device_id("samsung SM-S938N", 35)), "input", {"method": "set_text"})
+    s2 = LearnedSelectors(path)
+    assert s2.get(s10, "input") == {"method": "focus_paste"}  # 다른 기기의 업데이트에 지워지지 않았다
+    assert s2.get(s15, "input") is None  # 같은 기기의 옛 버전은 버렸다
+
+
+async def test_input_method_calibrated_per_device(stack, tmp_path, monkeypatch):
+    """환경 맞추기: set_text 가 안 먹는 기기(안드로이드 10 노트9 의 뮤즈)는 포커스+붙여넣기를 찾아 저장하고 다음부터 그것만 쓴다."""
+    base, gw, phone = stack
+    app = phone.chats["com.facebook.aura"]
+    app.set_text_ignored = True
+    a = _chat_adapter("muse", base, tmp_path)
+    try:
+        res = await a.ask("하나", "t1", timeout_s=60)
+        assert res.ok and res.raw == "echo: 하나", res
+        key = app_key("com.facebook.aura", "1.0-fake(1)", device_id("fake-phone", 34))
+        assert a.learned.get(key, "input") == {"method": "focus_paste"}
+        # 다음 전송은 저장된 방법만 쓴다(set_text 를 쓰면 붙여넣기까지 막히는 앱)
+        app.poisoned = False
+        res = await a.ask("둘", "t1", timeout_s=60)
+        assert res.ok and res.raw == "echo: 둘", res
+        assert app.poisoned is False
+        assert app.voice_entered == 0
+    finally:
+        await a.device.aclose()
+
+
+async def test_no_screenshot_phone_uses_tree_rule_or_never_guesses(stack, tmp_path, monkeypatch):
+    """스크린샷이 없는 안드로이드 10: Cue 는 트리 규칙(입력줄이 하나 늘면 맨 오른쪽이 ↑)으로 보낸다.
+    규칙이 없는 앱이면 이름 없는 버튼을 추측해 누르지 않는다(마이크 안전)."""
+    base, gw, phone = stack
+    gw.link.sdk = 29
+    cue = phone.chats["ai.manus.agents"]
+    a = _chat_adapter("cue", base, tmp_path)
+    try:
+        res = await a.ask("하나", "t1", timeout_s=30)
+        assert res.ok and res.raw == "echo: 하나", res
+        assert cue.voice_entered == 0
+    finally:
+        await a.device.aclose()
+    b = _chat_adapter("cue", base, tmp_path / "norule")
+    b.sel.pop("send_tree_rule")
+    try:
+        res = await b.ask("둘", "t2", timeout_s=30)
+        assert not res.ok and res.error == "unavailable", res
+        assert cue.voice_entered == 0
+    finally:
+        await b.device.aclose()
+
+
+async def test_three_bots_share_one_phone(stack, tmp_path, monkeypatch, vooy_phone):
+    """세 봇이 동시에 물어도 화면 임대로 차례로 쓰고, 기다리는 동안은 화면을 놓아 서로 막지 않는다."""
+    base, gw, phone = stack
+    v, _, _ = vooy_phone
+    p, m = _chat_adapter("pickle", base, tmp_path), _chat_adapter("muse", base, tmp_path)
+    try:
+        rs = await asyncio.gather(
+            v.ask("하나", "t", timeout_s=60), p.ask("둘", "t", timeout_s=60), m.ask("셋", "t", timeout_s=60)
+        )
+        assert [r.raw for r in rs] == ["echo: 하나", "echo: 둘", "echo: 셋"], rs
+    finally:
+        await p.device.aclose()
+        await m.device.aclose()
+
+
+async def test_apk_distribution(tmp_path):
+    """워커 앱 배포: 최신 정보·다운로드는 기기 토큰, 브라우저 설치는 한 번만 쓰는 링크(허브 토큰으로 발급)."""
+    import json
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    port = _free_port()
+    gw = Gateway(HUB, DEV, [], apk_dir=dist)
+    server = uvicorn.Server(uvicorn.Config(gw.app(), host="127.0.0.1", port=port, log_level="warning", ws="websockets-sansio"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.02)
+    base = f"http://127.0.0.1:{port}"
+    try:
+        async with httpx.AsyncClient(base_url=base, timeout=10) as c:
+            dev = {"Authorization": f"Bearer {DEV}"}
+            # 아직 배포본 없음
+            assert (await c.get("/phone/apk/latest.json", headers=dev)).status_code == 404
+            (dist / "multibot-worker.apk").write_bytes(b"APKDATA")
+            (dist / "latest.json").write_text(json.dumps({"versionCode": 7, "versionName": "x", "sha256": "s"}), encoding="utf-8")
+            # 기기 토큰 없으면 막힌다. 허브 토큰도 안 된다
+            assert (await c.get("/phone/apk/latest.json")).status_code == 401
+            assert (await c.get("/phone/apk/download", headers={"X-Hub-Token": HUB})).status_code == 401
+            assert (await c.get("/phone/apk/latest.json", headers=dev)).json()["versionCode"] == 7
+            r = await c.get("/phone/apk/download", headers=dev)
+            assert r.status_code == 200 and r.content == b"APKDATA"
+            assert r.headers["content-type"] == "application/vnd.android.package-archive"
+            # 일회용 링크: 허브 토큰으로만 발급, 한 번 쓰면 끝
+            assert (await c.post("/apk/link")).status_code == 401
+            path = (await c.post("/apk/link", headers={"X-Hub-Token": HUB})).json()["path"]
+            assert (await c.get(path)).content == b"APKDATA"
+            assert (await c.get(path)).status_code == 404
+            assert (await c.get("/phone/apk/once/guess")).status_code == 404
+            # 만료
+            path2 = (await c.post("/apk/link", headers={"X-Hub-Token": HUB})).json()["path"]
+            gw._once = {k: 0.0 for k in gw._once}
+            assert (await c.get(path2)).status_code == 404
+    finally:
+        server.should_exit = True
+        await task
+
+
+def test_is_own_only_accepts_timestamp_prefix():
+    """내 말풍선에 붙은 시각은 인정하고, 보낸 글로 끝나는 답("echo: …")은 내 글로 보지 않는다."""
+    assert is_own("오늘 날씨", "오늘 날씨")
+    assert is_own("어제 7:20 오후 오늘 날씨", "오늘 날씨")
+    assert is_own("오늘 날씨 오후 3:05", "오늘 날씨")
+    assert not is_own("echo: 오늘 날씨", "오늘 날씨")
+    assert not is_own("네, 오늘 날씨", "오늘 날씨")
