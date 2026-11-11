@@ -134,7 +134,7 @@ class ClaudeCodeRunner(Runner):
         s.work_dir.mkdir(parents=True, exist_ok=True)
         run_dir = s.runs_dir / str(session.run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "mcp.json").write_text(json.dumps(build_mcp_config(session.bots), ensure_ascii=False), encoding="utf-8")
+        (run_dir / "mcp.json").write_text(json.dumps(build_mcp_config(session.bots, self.settings.tool_timeout_s), ensure_ascii=False), encoding="utf-8")
         template = s.prompt_file.read_text(encoding="utf-8")
         values = {
             "session_id": session.session_id,

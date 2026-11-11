@@ -90,6 +90,8 @@ class FakeVooyDevice:
         self._targets: list[tuple[tuple[int, int, int, int], Callable[[], None]]] = []
         self._image_boxes: list[tuple[int, int, int, int]] = []
         self.clicks: list[tuple[int, int]] = []
+        # 봇 메시지가 도착할 때 부른다(가짜 휴대폰이 앱이 전경이 아니면 알림 이벤트로 올린다)
+        self.on_bot_message: Callable[[Msg], None] | None = None
 
     # --- 상태 --------------------------------------------------------------
 
@@ -108,7 +110,8 @@ class FakeVooyDevice:
             self.foreground = True
 
     async def press(self, key: str) -> None:
-        return None
+        if key == "home":
+            self.foreground = False
 
     async def reboot(self) -> None:
         self.foreground = False
@@ -123,7 +126,9 @@ class FakeVooyDevice:
         self.input = text
 
     async def set_text(self, selector: dict[str, str], text: str) -> None:
-        if selector.get("description") != "Message":
+        desc = selector.get("description")
+        pat = selector.get("descriptionMatches")
+        if not (desc == "Message" or (pat and re.search(pat, "Message"))):
             raise RuntimeError(f"UiObjectNotFound: {selector}")
         self.input = text
 
@@ -188,9 +193,13 @@ class FakeVooyDevice:
                     await asyncio.sleep(self.latency / 2)
                     first.stamp = _stamp()
                     self.messages.append(first)
+                    if self.on_bot_message is not None:
+                        self.on_bot_message(first)
                 await asyncio.sleep(self.latency)
                 reply.stamp = _stamp()
                 self.messages.append(reply)
+                if self.on_bot_message is not None:
+                    self.on_bot_message(reply)
             finally:
                 self.typing -= 1
 

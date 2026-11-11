@@ -78,6 +78,9 @@ class MockDriver:
     def expire_login(self) -> None:
         compose("exec", "-T", self.service, "rm", "-f", "/data/session.json")
 
+    def restore_login(self) -> None:
+        """사람이 봇에 다시 로그인하는 단계. 관리 HTTP /login/complete 가 상태를 저장하는 어댑터는 할 일이 없다."""
+
     def restart(self) -> None:
         compose("restart", self.service)
 
@@ -105,6 +108,22 @@ class FakeVooyDriver(MockDriver):
 
     def expire_login(self) -> None:
         compose("exec", "-T", self.service, "rm", "-f", "/data/fake-vooy/session")
+
+
+@dataclass
+class PhoneVooyDriver(FakeVooyDriver):
+    """휴대폰 워커 경로의 Vooy(게이트웨이 + 가짜 휴대폰, adapters/testing/fake_phone.py).
+
+    로그인 상태는 가짜 휴대폰 쪽에 있다. 실제로도 사람이 휴대폰에서 다시 로그인한다.
+    """
+
+    phone_service: str = "fake-phone"
+
+    def expire_login(self) -> None:
+        compose("exec", "-T", self.phone_service, "rm", "-f", "/data/fake-vooy/session")
+
+    def restore_login(self) -> None:
+        compose("exec", "-T", self.phone_service, "sh", "-c", "echo logged-in > /data/fake-vooy/session")
 
 
 @dataclass
@@ -168,12 +187,13 @@ KNOWN = {
     "mock-c": (9003, 9103),
     "vooy-fake": (9004, 9104),
     "vooy": (9005, 9105),
+    "vooy-phone": (9006, 9106),
 }
-DRIVERS = {"vooy-fake": FakeVooyDriver, "vooy": LiveVooyDriver}
+DRIVERS = {"vooy-fake": FakeVooyDriver, "vooy": LiveVooyDriver, "vooy-phone": PhoneVooyDriver}
 
 
 def _targets() -> list[Target]:
-    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c,vooy-fake").split(",") if n.strip()]
+    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c,vooy-fake,vooy-phone").split(",") if n.strip()]
     out = []
     for n in names:
         if n not in KNOWN:

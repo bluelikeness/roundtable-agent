@@ -10,15 +10,20 @@ from runner.shared import BotEndpoint
 
 TOKEN_ENV = "HUB_ADAPTER_TOKEN"
 BOT_TOOLS = ("ask", "status")
+# 어댑터 ask 의 timeout_s 상한(03 2장 스키마 maximum 240) + 네트워크 여유.
+# Claude Code 는 HTTP MCP 툴 호출을 기본 60초에 끊는다. 그러면 어댑터가 늦게 받은 답이 버려진다(P2 스모크).
+TOOL_TIMEOUT_S = 270
 
 
-def build_mcp_config(bots: list[BotEndpoint]) -> dict[str, Any]:
+def build_mcp_config(bots: list[BotEndpoint], tool_timeout_s: float = TOOL_TIMEOUT_S) -> dict[str, Any]:
     return {
         "mcpServers": {
             b.name: {
                 "type": "http",
                 "url": b.mcp_url,
                 "headers": {"X-Hub-Token": "${" + TOKEN_ENV + "}"},
+                # 서버별 툴 호출 제한(밀리초). 2.1.310 에서 60초 넘는 호출이 끝까지 오는 것을 확인
+                "timeout": int(tool_timeout_s * 1000),
             }
             for b in bots
         }
