@@ -135,6 +135,7 @@ class PhoneChatAdapter(AndroidAdapter):
     SEND_SETTLE_S = 0.4
     SEND_CHECK_S = 1.0
     SEND_TRIES = 3
+    SEND_FIRST_CHECK_S = 0.3
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(느린 휴대폰은 트리 반영이 몇 초 늦다)
     FOCUS_SETTLE_S = 1.0
     INPUT_CHECK_S = 3.0  # 노트9: set_text 결과가 트리에 1.5초 넘게 늦게 보이기도 한다
@@ -163,6 +164,7 @@ class PhoneChatAdapter(AndroidAdapter):
         self._pre_field: Bounds | None = None
         self._pre_icons: list[bytes] | None = None
         self._pre_bounds: list[tuple[int, int, int, int]] = []
+        self._confirm_root: UiNode | None = None
         self._sdk: int | None = None
         self._set_text_used = False
 
@@ -264,6 +266,7 @@ class PhoneChatAdapter(AndroidAdapter):
             dev = device_id(prof.get("device"), self._sdk) if prof.get("device") else None
             self._app_key = app_key(self.android.package, await self.device.app_version(self.android.package), dev)
         self._set_text_used = False
+        self._confirm_root = None
         root = await self.tree()
         self._baseline = {self._sig(n) for n in self._texts(root)}
         self._sent_norm = None
@@ -304,8 +307,10 @@ class PhoneChatAdapter(AndroidAdapter):
             await self._tap_send(body)
             self._sent_norm = _norm(body)
         replied = False
-        if self.phone_mode and self._sent_norm:
-            replied = bool(self._new_texts(await self.tree()))
+        if self.phone_mode and self._sent_norm and self._confirm_root is not None:
+            # 답은 알림으로 안다. 앱이 열려 있는 동안 온 답은 알림이 뜨지 않으므로 전송이 확인되면 바로 홈으로
+            # 나간다. 화면을 더 읽지 않고, 전송을 확인한 그 화면에 답이 벌써 있는지만 본다
+            replied = bool(self._new_texts(self._confirm_root))
         await self.after_send(already_replied=replied)
 
     async def _clear_input(self) -> None:
@@ -542,9 +547,13 @@ class PhoneChatAdapter(AndroidAdapter):
             # 뒤라 헛누름(또는 중복 전송)이 된다 → 잠시 여러 번 본다
             loop = asyncio.get_running_loop()
             until = loop.time() + max(self.SEND_CHECK_S, self.SEND_CONFIRM_S)
+            first = True
             while True:
-                await asyncio.sleep(self.SEND_CHECK_S)
+                # 첫 확인은 짧게(전송이 확인되는 대로 앱을 떠나야 답 알림이 뜬다)
+                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else self.SEND_CHECK_S)
+                first = False
                 root = await self.tree()
+                self._confirm_root = root
                 if self._only_with_text(used) and await self._find_send(root, for_press=False) is None:
                     return self._learn(used)  # 전송 버튼이 사라졌다 = 입력창이 비었다(접근성 트리의 입력창 글자는 늦게 지워진다: 뮤즈)
                 if mine(root) > before:
