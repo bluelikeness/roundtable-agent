@@ -90,7 +90,8 @@ async def test_ask_login_expired(target: Target):
             assert calls[0]["token_ok"] is True
             assert calls[0]["body"]["available"] is False
         finally:
-            # 관리 HTTP 로그인 흐름으로 복구
+            # 관리 HTTP 로그인 흐름으로 복구(휴대폰 경로는 사람이 휴대폰에서 다시 로그인하는 단계가 먼저)
+            target.driver.restore_login()
             async with target.admin() as c:
                 started = (await c.post("/login/start", json={})).json()
                 assert started["flow"] in ("code", "vnc")

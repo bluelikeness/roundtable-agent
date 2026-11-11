@@ -306,6 +306,8 @@ class AndroidConfig(BaseModel):
     vnc_url: str = ""
     # 하루 전송 상한(03 7장 레이트 리밋). 0 이면 끈다
     daily_limit: int = 300
+    # 휴대폰 경로(PhoneDevice): 답 알림이 이만큼 안 오면 화면을 직접 읽기 시작한다
+    notify_fallback_s: float = 60
 
 
 def load_selectors(path: str | Path) -> dict[str, Any]:
@@ -336,6 +338,69 @@ class AndroidAdapter(BotAdapter):
         self.sel: dict[str, Any] = load_selectors(selectors_path) if selectors_path else {}
         self.device: Device = make_device(self.android.device_factory, self.android.serial)
         self._recovering: asyncio.Task | None = None
+        # 휴대폰 경로의 답 알림 대기 상태(큐가 직렬이라 왕복 하나분)
+        self._notif_cursor = 0
+        self._signaled = True
+        self._fallback_at = 0.0
+
+    @property
+    def phone_mode(self) -> bool:
+        """기기가 휴대폰 워커(PhoneDevice)인지. 알림으로 답을 기다리고, 기다리는 동안 화면을 놓는다."""
+        return hasattr(self.device, "wait_notification")
+
+    # --- 휴대폰 경로: 보내기 → 홈 → 알림 → 읽기 (docs/proposals/phone-worker.md 6장) ---
+
+    async def before_send(self) -> None:
+        """보내기 직전의 알림 커서. 보낸 직후 온 알림도 놓치지 않게 먼저 잡는다."""
+        if self.phone_mode:
+            self._notif_cursor = await self.device.events_cursor()
+
+    async def after_send(self, already_replied: bool = False) -> None:
+        """보낸 뒤 홈으로 나가 화면을 놓는다. 앱이 전경이면 답 알림이 오지 않는다.
+
+        already_replied: 나가기 전에 이미 답이 화면에 있으면(빠른 봇) 알림을 기다리지 않고 바로 읽는다.
+        """
+        if not self.phone_mode:
+            return
+        if already_replied:
+            self._signaled = True
+            await self.device.release()
+            return
+        self._signaled = False
+        self._fallback_at = time.monotonic() + self.android.notify_fallback_s
+        await self.device.press("home")
+        await self.device.release()
+
+    async def reply_signal(self, deadline: float) -> bool:
+        """답을 읽으러 화면을 열어도 되는지. 에뮬레이터는 늘 True(화면을 계속 본다).
+
+        휴대폰은 대상 앱의 답 알림이 오면 True. 알림이 notify_fallback_s 동안 없거나 이번 대기의
+        끝이 가까우면(재전송 전에 한 번은 화면을 본다) 화면을 직접 읽는다.
+        """
+        if not self.phone_mode or self._signaled:
+            return True
+        now = time.monotonic()
+        wait = max(0.0, min(1.0, deadline - now))
+        posted, self._notif_cursor = await self.device.wait_notification(self.android.package, self._notif_cursor, wait)
+        now = time.monotonic()
+        if posted:
+            log.info("답 알림 %d개 → 화면 읽기", len(posted))
+            self._signaled = True
+        elif now >= self._fallback_at or deadline - now <= max(10.0, self.quiet_s * 3):
+            log.info("답 알림 없음 → 화면을 직접 읽음")
+            self._signaled = True
+        return self._signaled
+
+    async def open_for_read(self) -> None:
+        """휴대폰: 읽기 전에 앱을 전경으로(런처 인텐트. 알림 PendingIntent 는 BAL 에 막힌다)."""
+        if self.phone_mode and await self.ensure_foreground():
+            await asyncio.sleep(1.0)
+
+    async def after_read(self) -> None:
+        """휴대폰: 다 읽었으면 홈으로 나가 화면을 놓는다."""
+        if self.phone_mode:
+            await self.device.press("home")
+            await self.device.release()
 
     # --- 기기 상태 ---------------------------------------------------------
 
@@ -351,6 +416,9 @@ class AndroidAdapter(BotAdapter):
             raise BackendDown("에뮬레이터 복구 중")
         if await self.device.is_booted():
             return
+        if self.phone_mode:
+            # 휴대폰은 재부팅하지 않는다. 연결이 돌아오거나 사람이 잠금을 풀 때까지 사용할 수 없음
+            raise BackendDown("휴대폰이 연결돼 있지 않거나 화면이 꺼졌거나 잠겨 있음")
         self.start_recovery()
         raise BackendDown("에뮬레이터 응답 없음(boot_completed 아님)")
 

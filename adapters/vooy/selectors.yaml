@@ -4,13 +4,14 @@
 # 기준: Vooy 1.4.4 (P0 확인, 2026-11-08 / P2 접근성 트리 재확인, 2026-11-09)
 
 # 입력창과 전송 버튼. input_u2 는 uiautomator2 set_text 용 셀렉터(키 이름이 다르다)
-input: {desc: Message}
-input_u2: {description: Message}
-send: {desc: Send message}
+# 휴대폰 Vooy 는 한국어 UI 라 라벨이 다르다(2026-11-11 실기기: "메시지 입력"·"메시지 전송")
+input: {desc_re: '^(Message|메시지 입력)$'}
+input_u2: {descriptionMatches: '^(Message|메시지 입력)$'}
+send: {desc_re: '^(Send message|메시지 전송)$'}
 # 하단 탭의 에이전트 대화방. 대화방이 아닌 화면이면 이 탭을 누른다
 home_tab: {rid: android-gnb-home}
 # 대화 목록 ScrollView. 버튼·이미지는 이 안에서만 찾는다
-conversation: {desc: Conversation}
+conversation: {desc_re: '^(Conversation|대화)$'}
 # 입력창 묶음(이보다 아래는 대화 영역이 아니다)
 composer: {rid: composer-input-pill}
 

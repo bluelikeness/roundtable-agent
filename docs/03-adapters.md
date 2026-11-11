@@ -186,7 +186,8 @@ hub_webhook: http://hub-api:8000/internal/bot-status
 ```
 adapters/
   base.py            # BotAdapter, AskResult, Structured, Thread, serve()
-  android_base.py    # 에뮬레이터 기동·접근성 트리·한글 입력 (Vooy·피클 공통)
+  android_base.py    # 접근성 트리·한글 입력·휴대폰 경로 흐름 (Vooy·피클·뮤즈 공통)
+  phone/             # 폰 게이트웨이(gateway.py), PhoneDevice(device.py), 휴대폰 명령 규약(protocol.py)
   mcp_server.py      # ask/status 툴 등록, streamable HTTP
   admin_api.py       # 관리 HTTP
   vooy/  {adapter.py, config.yaml, Dockerfile}
@@ -196,6 +197,8 @@ adapters/
 ```
 
 ## 7. Vooy 어댑터
+
+> **ADR-9(2026-11-11)**: 운영 기기는 에뮬레이터가 아니라 사용자 휴대폰이다. 어댑터는 `ANDROID_DEVICE_FACTORY=adapters.phone.device:PhoneDevice`로 폰 게이트웨이를 거쳐 휴대폰을 조종하고, 흐름은 "보내기 → 홈으로 나가기 → 답 알림 대기 → 앱을 열어 읽기 → 홈"이다(docs/proposals/phone-worker.md 6장). 프로브는 앱을 열지 않고 휴대폰 연결·잠금만 본다. 로그인은 사람이 휴대폰에서 직접 하고 `/login/start`는 안내만 돌려준다. 휴대폰 Vooy는 한국어 UI라 입력창·전송 버튼 라벨이 "메시지 입력"·"메시지 전송"이다(`selectors.yaml`이 둘 다 받는다). 아래 에뮬레이터 항목은 개발용 경로로 남긴다.
 
 안드로이드 에뮬레이터 안의 Vooy 앱(`com.vooy.mobile`)을 조작한다. 처음 설계는 텔레그램 유저 세션(Telethon)이었으나, P0에서 앱 경로가 GPU 없는 에뮬레이터에서도 한글 송수신까지 동작함을 확인해 앱 경로로 바꿨다(요구사항 7장 ①). 전용 텔레그램 계정·`api_id` 발급·유저 세션 자동화의 계정 정지 위험이 없어진다. 에뮬레이터 기동·접근성 트리 읽기·한글 입력은 피클과 공통이므로 `adapters/android_base.py`로 묶어 두 어댑터가 함께 쓴다. 가장 먼저 만드는 실봇 어댑터이고, 피클 어댑터의 기준 구현이 된다.
 
@@ -222,6 +225,8 @@ adapters/
 
 ## 8. 뮤즈 어댑터
 
+> **ADR-9(2026-11-11)**: muse.ai 웹·Playwright·VPN 대신 휴대폰의 Meta AI 앱(`com.facebook.aura`)을 7장과 같은 휴대폰 경로로 조종한다. 실측: 입력창 `hatch-message-input`, 전송 `hatch-send-button`, 작업 중 알림 채널 `aura_run_in_background`이 사라지고 `aura_conversations` 답 알림이 오면 응답 끝. 아래 웹 설계는 이력으로 남긴다(W3에서 교체).
+
 muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정적이고 서버에 에뮬레이터가 필요 없다. 지역 제약은 컨테이너 egress를 VPN으로 돌려 푼다.
 
 | 항목 | 설계 |
@@ -243,6 +248,8 @@ muse.ai 웹을 Playwright로 조작한다. 모바일 UI 자동화보다 안정�
 - 지역 차단이 계정 레벨이라 VPN으로도 안 풀리는 경우: 어댑터를 Meta Model API 기반 `muse-api` 어댑터로 교체. 인터페이스는 같으므로 Claude Code·허브는 영향 없음. 이 대체 어댑터는 "에이전트 실행 없이 답만 하는 뮤즈"임을 `description`에 명시한다.
 
 ## 9. 피클 어댑터
+
+> **ADR-9(2026-11-11)**: 에뮬레이터·전용 AVD·스냅샷 대신 휴대폰의 피클 앱을 7장과 같은 휴대폰 경로로 조종한다. 실측: 휴대폰에서는 입력창에 접근성 `SET_TEXT`가 바로 되고(에뮬레이터의 `send_keys` 우회 불필요) 전송 라벨은 "보내기", 답은 말풍선마다 알림 하나(`MessagingStyle`, `pickle.seq`). 아래 에뮬레이터 설계는 이력으로 남긴다(W3에서 교체).
 
 안드로이드 에뮬레이터 안의 피클 앱을 `android_base.py`(Vooy와 공통)로 조작한다. VM 2에서 돌고, 허브와는 WireGuard 사설망으로만 연결된다.
 

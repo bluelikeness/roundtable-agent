@@ -148,6 +148,10 @@ class VooyAdapter(AndroidAdapter):
         raise BackendDown("Vooy 대화방 입력창을 찾지 못함(셀렉터 확인 필요)")
 
     async def _probe(self) -> None:
+        if self.phone_mode:
+            # 휴대폰은 5분마다 앱을 열면 사람이 쓰는 화면을 빼앗는다. 연결·잠금 상태만 본다
+            await self.ensure_device()
+            return
         await self._ensure_ready()
 
     # --- 훅: 전송 ----------------------------------------------------------
@@ -176,6 +180,10 @@ class VooyAdapter(AndroidAdapter):
     async def _send(self, thread: Thread, text: str, tap: str | None) -> None:
         self._check_daily()
         self._thread = thread
+        if self.phone_mode and await self.device.current_package() != self.android.package:
+            # 재전송: 첫 전송 뒤 홈으로 나가 있으므로 대화방을 다시 연다
+            await self._ensure_ready()
+        await self.before_send()
         # _ensure_ready 가 방금 읽은 화면을 다시 쓴다. swiftshader 에서는 덤프 한 번이 6~27초다
         root = await self._tree(max_age_s=self.TREE_REUSE_S)
         self._baseline = self._sigs(root)
@@ -201,6 +209,12 @@ class VooyAdapter(AndroidAdapter):
             self._sent_norm = _norm(body)
             self._count_daily()
         self._tree_cache = None
+        replied = False
+        if self.phone_mode and self._sent_norm:
+            # 홈으로 나가기 전에 이미 답이 왔는지. 대화방이 열려 있는 동안 온 답은 알림이 뜨지 않는다
+            replied = bool(self._new_bubbles(await self._tree()))
+            self._tree_cache = None
+        await self.after_send(already_replied=replied)
 
     async def _tap_send(self) -> None:
         """전송 버튼을 누르고 입력창이 비었는지로 전송을 확인한다.
@@ -234,17 +248,11 @@ class VooyAdapter(AndroidAdapter):
     # --- 훅: 수집 ----------------------------------------------------------
 
     async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]:
+        if not await self.reply_signal(deadline):
+            return []  # 휴대폰: 답 알림 전에는 화면을 열지 않는다
+        await self.open_for_read()
         root = await self._tree()
-        bots = self._bubbles(root, self.sel["bot_bubble"])
-        new: list[UiNode]
-        anchor = None
-        if self._sent_norm:
-            owns = [o for o in self._bubbles(root, self.sel["own_bubble"]) if self._own_matches(o)]
-            anchor = owns[-1] if owns else None
-        if anchor is not None:
-            new = [b for b in bots if b.bounds.top >= anchor.bounds.bottom]
-        else:
-            new = [b for b in bots if self._bubble_text(b) not in self._baseline]
+        new = self._new_bubbles(root)
 
         msgs: list[RawMessage] = []
         seen: dict[str, int] = {}
@@ -266,6 +274,17 @@ class VooyAdapter(AndroidAdapter):
             if any(r.search(m.text) for r in self._limit_re):
                 raise RateLimited(f"Vooy 사용 제한 안내: {m.text[:60]}")
         return msgs
+
+    def _new_bubbles(self, root: UiNode) -> list[UiNode]:
+        """보낸 메시지(내 말풍선) 아래의 봇 말풍선. 내 말풍선이 안 보이면 보내기 전에 없던 것."""
+        bots = self._bubbles(root, self.sel["bot_bubble"])
+        anchor = None
+        if self._sent_norm:
+            owns = [o for o in self._bubbles(root, self.sel["own_bubble"]) if self._own_matches(o)]
+            anchor = owns[-1] if owns else None
+        if anchor is not None:
+            return [b for b in bots if b.bounds.top >= anchor.bounds.bottom]
+        return [b for b in bots if self._bubble_text(b) not in self._baseline]
 
     def _own_matches(self, own: UiNode) -> bool:
         body, _ = self._bubble_text(own)
@@ -351,6 +370,7 @@ class VooyAdapter(AndroidAdapter):
         if self._thread is not None:
             # [tap:] 때 action_id → 라벨을 찾는다. 베이스가 스레드를 저장한다
             self._thread.data["buttons"] = labels
+        await self.after_read()
         return raw, s
 
     # --- 훅: 로그인·리셋 ---------------------------------------------------
@@ -361,6 +381,10 @@ class VooyAdapter(AndroidAdapter):
             await self.device.login_completed()
             self._tree_cache = None
 
+        if self.phone_mode:
+            # 휴대폰 경로: 로그인은 사람이 휴대폰에서 직접 한다. 03 5장 flow 값은 code|vnc 뿐이라 vnc 에 URL 없이 안내만 싣는다
+            # (전용 flow 값은 설계 변경안 10장 미결)
+            return VncLogin(hint="휴대폰에서 Vooy 앱에 직접 로그인한 뒤 '완료'를 누르세요.", vnc_url="", complete=complete)
         return VncLogin(
             hint="noVNC 화면에서 Vooy 앱에 Google 또는 이메일로 로그인한 뒤 '완료'를 누르세요.",
             vnc_url=self.android.vnc_url,
