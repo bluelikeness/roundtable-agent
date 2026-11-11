@@ -51,6 +51,7 @@ async def test_first_run_args_and_events(settings, claude_log, monkeypatch):
     assert json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True}
     assert call["tool_search"] == "false"
     assert set(call["mcp"]["mcpServers"]) == {"mock-a", "mock-b"}
+    assert {m["timeout"] for m in call["mcp"]["mcpServers"].values()} == {270_000}
     # 토큰은 파일이 아니라 환경변수로만
     assert TOKEN not in json.dumps(call["mcp"])
     assert call["token"] == TOKEN

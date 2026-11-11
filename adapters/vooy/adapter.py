@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
@@ -64,6 +65,13 @@ class ButtonNotFound(AdapterError):
 
 
 class VooyAdapter(AndroidAdapter):
+    # 전송 확인(_tap_send): 입력 반영 대기, 누른 뒤 확인 대기, 최대 시도 횟수
+    SEND_SETTLE_S = 0.5
+    SEND_CHECK_S = 1.0
+    SEND_TRIES = 3
+    # _ensure_ready 의 덤프를 _send 가 다시 쓰는 최대 나이
+    TREE_REUSE_S = 5.0
+
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = "", selectors_path: str | Path = SELECTORS):
         super().__init__(config, state_dir, token, selectors_path)
         extra = config.model_extra or {}
@@ -168,7 +176,8 @@ class VooyAdapter(AndroidAdapter):
     async def _send(self, thread: Thread, text: str, tap: str | None) -> None:
         self._check_daily()
         self._thread = thread
-        root = await self._tree()
+        # _ensure_ready 가 방금 읽은 화면을 다시 쓴다. swiftshader 에서는 덤프 한 번이 6~27초다
+        root = await self._tree(max_age_s=self.TREE_REUSE_S)
         self._baseline = self._sigs(root)
         self._sent_norm = None
 
@@ -185,17 +194,35 @@ class VooyAdapter(AndroidAdapter):
             if field is None:
                 raise BackendDown("입력창 없음")
             await self.tap(field)
-            # 키보드가 올라오면 입력창이 위로 움직인다: 다시 찾는다(P0 확인)
-            if await self.wait_for(3, **self.sel["input"]) is None:
-                raise BackendDown("입력창이 사라짐")
+            # 키보드가 올라오면 입력창이 위로 움직이지만 set_text 는 좌표가 아닌 셀렉터로 찾는다.
+            # 화면을 다시 덤프하지 않는다(조회 한 번이 수 초라 sending 단계 시간을 다 쓴다)
             await self.input_text(self.sel["input_u2"], body)
-            send = (await self._tree()).find(**self.sel["send"])
-            if send is None:
-                raise BackendDown("전송 버튼 없음")
-            await self.tap(send)
+            await self._tap_send()
             self._sent_norm = _norm(body)
             self._count_daily()
         self._tree_cache = None
+
+    async def _tap_send(self) -> None:
+        """전송 버튼을 누르고 입력창이 비었는지로 전송을 확인한다.
+
+        set_text 직후 바로 누르면 RN 이 입력값을 아직 반영하지 않아 눌러도 아무 일이 없다
+        (P2 스모크에서 확인: 글은 입력창에 남고 전송되지 않음). 잠깐 기다렸다 누르고,
+        입력창이 그대로면 다시 누른다. 입력창이 비었으면 전송된 것이므로 중복 전송은 없다.
+        """
+        await asyncio.sleep(self.SEND_SETTLE_S)
+        root = await self._tree()  # 키보드가 올라온 뒤의 버튼 위치
+        for _ in range(self.SEND_TRIES):
+            send = root.find(**self.sel["send"])
+            if send is None:
+                raise BackendDown("전송 버튼 없음")
+            await self.tap(send)
+            await asyncio.sleep(self.SEND_CHECK_S)
+            # 확인용 덤프를 다음 시도의 버튼 위치로도 쓴다(전송 성공 시 덤프 2번)
+            root = await self._tree()
+            field = root.find(**self.sel["input"])
+            if field is None or not field.text.strip():
+                return
+        raise BackendDown(f"전송 버튼을 {self.SEND_TRIES}번 눌러도 입력창이 비지 않음")
 
     def _find_button(self, root: UiNode, label: str) -> UiNode | None:
         """직전 응답 영역의 버튼. 같은 라벨이 여럿이면 가장 아래(최신)."""

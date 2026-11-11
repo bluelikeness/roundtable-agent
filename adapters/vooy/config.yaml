@@ -5,7 +5,9 @@ description: |
   결제·예약 확정 전에는 확인을 요구한다(confirmation_required).
   봇 쪽 대화방이 하나뿐이고 이전 대화를 기억하므로, 필요한 맥락(날짜·인원·지역)은 메시지에 모두 넣는다.
   코딩·긴 문서 작성·일반 지식 질문에는 쓰지 않는다.
-timeouts: {default_s: 120, send_s: 15, quiet_s: 3}
+# swiftshader(GPU 없음) 에뮬레이터에서는 화면 조회 한 번이 6~27초다(P2 스모크 측정, 대화가 길수록 느림).
+# sending 단계(준비 확인·입력·전송 확인)가 조회 4번이라 send_s 를 넉넉히 둔다
+timeouts: {default_s: 180, send_s: 90, quiet_s: 3}
 queue: {max_depth: 5, max_wait_s: 60}
 min_interval_s: 3
 progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있", "^알아보고 있"]

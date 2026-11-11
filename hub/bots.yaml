@@ -13,3 +13,7 @@ bots:
     mcp_url: http://mock-c:9000/mcp
     admin_url: http://mock-c:9100
     aliases: [목씨]
+  - name: vooy
+    mcp_url: http://vooy:9000/mcp
+    admin_url: http://vooy:9100
+    aliases: [부이]

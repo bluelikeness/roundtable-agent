@@ -23,6 +23,8 @@ class RunnerSettings(BaseSettings):
     max_turns: int = 12
     # 프로세스 전체 상한(02 4장). 넘으면 SIGTERM
     timeout_s: float = 600
+    # MCP 툴 호출 하나의 상한(mcp.json 서버별 timeout). Claude Code 기본 60초를 덮는다
+    tool_timeout_s: float = 270
     # SIGTERM 뒤 이만큼 기다렸다가 SIGKILL
     term_grace_s: float = 5
     disallowed_tools: str = "Bash,Read,Write,Edit,WebSearch,WebFetch"

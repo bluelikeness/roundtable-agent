@@ -60,7 +60,40 @@ async def vooy(tmp_path, monkeypatch):
     a = VooyAdapter(cfg, tmp_path / "state")
     a.poll_s = 0.05
     a.android.app_start_wait_s = 1
+    a.SEND_SETTLE_S = 0
+    a.SEND_CHECK_S = 0.05
     return a
+
+
+def _drop_send_clicks(vooy, n):
+    """전송 버튼 클릭을 앞에서 n 번 무시한다(RN 이 입력값을 아직 반영하지 않은 상태 흉내)."""
+    dev = vooy.device
+    real = dev.click
+    left = {"n": n}
+
+    async def click(x, y):
+        if 925 <= x <= 1014 and y >= 2000 and left["n"] > 0:
+            left["n"] -= 1
+            dev.clicks.append((x, y))
+            return
+        await real(x, y)
+
+    dev.click = click
+
+
+async def test_send_retries_when_first_tap_ignored(vooy):
+    await vooy.ask("준비", "t1")  # 앱 기동·기기 준비
+    _drop_send_clicks(vooy, 1)
+    r = await vooy.ask("안녕 Vooy", "t1")
+    assert r.ok, r
+    assert r.raw == "echo: 안녕 Vooy"  # 한 번만 보냈다(중복 없음)
+
+
+async def test_send_gives_up_when_input_never_clears(vooy):
+    await vooy.ask("준비", "t1")
+    _drop_send_clicks(vooy, 99)
+    r = await vooy.ask("안녕 Vooy", "t1")
+    assert not r.ok and r.error == "unavailable", r  # BackendDown → unavailable
 
 
 def test_bubble_text_and_order(vooy):

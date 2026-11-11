@@ -11,6 +11,7 @@ from httpx_ws import WebSocketDisconnect, aconnect_ws
 from httpx_ws.transport import ASGIWebSocketTransport
 from sqlalchemy import select
 
+from app.bots import load_bots
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.events import (
@@ -157,7 +158,8 @@ async def test_send_relays_events_and_persists(wsclient, operator, fake_runner):
         rs = fake_runner.sessions[0]
         assert str(rs.session_id) == sid and str(rs.run_id) == run_id
         assert rs.claude_session_id is None and rs.tool_calls == 0
-        assert {b.name for b in rs.bots} == {"mock-a", "mock-b", "mock-c"}
+        # bots.yaml 에 등록된 봇 전부(봇을 추가해도 이 테스트를 고치지 않게 설정에서 읽는다)
+        assert {b.name for b in rs.bots} == {b.name for b in load_bots(get_settings().bots_file)}
 
         async with get_sessionmaker()() as db:
             rows = (await db.execute(select(Message).where(Message.session_id == uuid.UUID(sid)).order_by(Message.seq))).scalars().all()

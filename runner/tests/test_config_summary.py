@@ -23,7 +23,9 @@ def test_mcp_config_and_allowed_tools():
         "type": "http",
         "url": "http://mock-a:9000/mcp",
         "headers": {"X-Hub-Token": "${HUB_ADAPTER_TOKEN}"},
+        "timeout": 270_000,  # Claude Code 기본 60초 툴 제한을 덮는다
     }
+    assert build_mcp_config(bots, 90)["mcpServers"]["vooy"]["timeout"] == 90_000
     assert allowed_tools(bots) == ["mcp__mock-a__ask", "mcp__mock-a__status", "mcp__vooy__ask", "mcp__vooy__status"]
 
 
