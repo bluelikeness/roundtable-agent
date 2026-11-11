@@ -1,0 +1,22 @@
+name: muse
+description: |
+  Meta 의 AI 에이전트 "뮤즈"(Meta AI 앱, Muse Spark). 자체 가상 컴퓨터와 저장소로 웹 검색·자료 정리·
+  문서·이미지 작업을 하고, 인스타그램·스레드와 연결된다. 한국어·영어 모두 된다.
+  사용자 휴대폰의 앱으로 대화하며 답은 보통 15~40초, 긴 작업은 더 걸린다.
+  한국 생활 서비스(예약·주문·전화)는 약하다. 봇 쪽 대화방은 하나로 쓰고 이전 대화를 기억한다.
+# 실기기(2026-11-11): 보내기 약 6초, "작업 중" 알림 +1초 → 끝나면 답 알림 +17초
+timeouts: {default_s: 180, send_s: 60, quiet_s: 4}
+queue: {max_depth: 5, max_wait_s: 60}
+min_interval_s: 3
+progress_patterns: []
+question_patterns: ['\?$']
+health: {probe_interval_s: 300}
+hub_webhook: http://hub-api:8000/internal/bot-status
+android:
+  package: com.facebook.aura
+  input_method: set_text
+  app_start_wait_s: 8
+  daily_limit: 300
+  notify_fallback_s: 60
+  # 작업 중 알림. 답 신호로 치지 않고 떠 있는 동안 응답 중으로 본다
+  progress_channels: [aura_run_in_background]

@@ -16,10 +16,14 @@ WORKDIR /srv/adapters
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev --group android
 
-COPY __init__.py base.py auth.py mcp_server.py admin_api.py android_base.py ./
+COPY __init__.py base.py auth.py mcp_server.py admin_api.py android_base.py phonechat.py learned.py ./
 COPY vooy ./vooy
 # 휴대폰 워커 경로(PhoneDevice·게이트웨이). 같은 이미지로 phone-gateway 도 띄운다(python -m adapters.phone)
 COPY phone ./phone
+# 피클·뮤즈(범용 채팅 앱 어댑터 phonechat.py)도 같은 이미지로 띄운다(python -m adapters.pickle·muse)
+COPY pickle ./pickle
+COPY muse ./muse
+COPY cue ./cue
 # 계약 테스트용 가짜 기기(adapters.testing.fake_vooy). 운영에서는 ANDROID_DEVICE_FACTORY 를 비워 쓰지 않는다
 COPY testing ./testing
 

@@ -1,0 +1,21 @@
+name: cue
+description: |
+  Manus 의 개인 AI 에이전트 "Cue". 자체 전화번호·이메일·작업용 컴퓨터를 갖고 예약·전화·이메일 처리,
+  웹 조사·보고서 작성 같은 일을 대신 해 준다. 사용자 휴대폰의 앱으로 대화하며 간단한 답은 수십 초,
+  실제 작업(보고서·전화)은 수 분 이상 걸려 "진행하겠다"는 답이 먼저 올 수 있다.
+  봇 쪽 대화방이 하나뿐이고 이전 대화를 기억하므로 필요한 맥락은 메시지에 모두 넣는다.
+# 2026-11-11 실기기 화면 구조 확인(Flutter: 말풍선 글이 content-desc 에 있다). 응답 시간은 아직 측정 전
+timeouts: {default_s: 180, send_s: 60, quiet_s: 5}
+queue: {max_depth: 5, max_wait_s: 60}
+min_interval_s: 3
+progress_patterns: []
+question_patterns: ['\?$']
+health: {probe_interval_s: 300}
+hub_webhook: http://hub-api:8000/internal/bot-status
+android:
+  package: ai.manus.agents
+  input_method: set_text
+  app_start_wait_s: 8
+  daily_limit: 300
+  # 실기기(2026-11-11): 답 알림이 오지 않았다. 20초 뒤 화면을 직접 읽는다
+  notify_fallback_s: 20

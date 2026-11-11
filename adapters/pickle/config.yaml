@@ -1,0 +1,22 @@
+name: pickle
+description: |
+  한국 생활 심부름에 강한 개인 AI 비서 "피클". 전화 대행(식당·병원 예약 전화), 쿠팡·코레일 같은
+  국내 서비스 쇼핑·예매, 일정·이메일 정리를 대신 해 준다. 한국어 실력이 좋다.
+  사용자 휴대폰의 앱으로 대화하며 간단한 답은 10~30초, 실제 심부름(전화·결제)은 수 분~수 시간 걸려
+  답이 "진행하겠다"로 먼저 올 수 있다. 결제·예약 확정 전에는 확인을 요구한다(confirmation_required).
+  봇 쪽 대화방이 하나뿐이고 이전 대화를 기억하므로 필요한 맥락은 메시지에 모두 넣는다.
+  코딩·긴 문서 작성에는 쓰지 않는다.
+# 실기기(2026-11-11): 보내기 약 6초, 답 알림 +4~10초(말풍선마다 알림 하나)
+timeouts: {default_s: 180, send_s: 60, quiet_s: 5}
+queue: {max_depth: 5, max_wait_s: 60}
+min_interval_s: 3
+progress_patterns: ["^찾아볼게", "^잠시만", "^확인해 ?볼게", "^알아볼게"]
+question_patterns: ["몇 명", "언제", "어디", '\?$']
+health: {probe_interval_s: 300}
+hub_webhook: http://hub-api:8000/internal/bot-status
+android:
+  package: com.pickle.client
+  input_method: set_text
+  app_start_wait_s: 8
+  daily_limit: 300
+  notify_fallback_s: 60

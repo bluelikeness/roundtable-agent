@@ -15,6 +15,7 @@ ANDROID_ADB_SERVER_HOST/PORT 로 에뮬레이터 쪽 adb 서버에 붙는다(adb
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import io
 import logging
@@ -308,6 +309,8 @@ class AndroidConfig(BaseModel):
     daily_limit: int = 300
     # 휴대폰 경로(PhoneDevice): 답 알림이 이만큼 안 오면 화면을 직접 읽기 시작한다
     notify_fallback_s: float = 60
+    # "작업 중" 알림 채널(뮤즈 aura_run_in_background). 답 신호로 치지 않고, 떠 있는 동안 응답 중으로 본다
+    progress_channels: list[str] = []
 
 
 def load_selectors(path: str | Path) -> dict[str, Any]:
@@ -342,11 +345,16 @@ class AndroidAdapter(BotAdapter):
         self._notif_cursor = 0
         self._signaled = True
         self._fallback_at = 0.0
+        self._progress_keys: set[str] = set()
 
     @property
     def phone_mode(self) -> bool:
         """기기가 휴대폰 워커(PhoneDevice)인지. 알림으로 답을 기다리고, 기다리는 동안 화면을 놓는다."""
         return hasattr(self.device, "wait_notification")
+
+    def screen(self):
+        """휴대폰: 화면을 쓰는 한 묶음(보내기, 읽기)을 다른 봇과 섞이지 않게 잡는다. 에뮬레이터는 아무 일 없음."""
+        return self.device.hold() if self.phone_mode else contextlib.nullcontext()
 
     # --- 휴대폰 경로: 보내기 → 홈 → 알림 → 읽기 (docs/proposals/phone-worker.md 6장) ---
 
@@ -354,6 +362,7 @@ class AndroidAdapter(BotAdapter):
         """보내기 직전의 알림 커서. 보낸 직후 온 알림도 놓치지 않게 먼저 잡는다."""
         if self.phone_mode:
             self._notif_cursor = await self.device.events_cursor()
+            self._progress_keys = set()
 
     async def after_send(self, already_replied: bool = False) -> None:
         """보낸 뒤 홈으로 나가 화면을 놓는다. 앱이 전경이면 답 알림이 오지 않는다.
@@ -381,7 +390,7 @@ class AndroidAdapter(BotAdapter):
             return True
         now = time.monotonic()
         wait = max(0.0, min(1.0, deadline - now))
-        posted, self._notif_cursor = await self.device.wait_notification(self.android.package, self._notif_cursor, wait)
+        posted = self._absorb(*await self.device.wait_events(self.android.package, self._notif_cursor, wait))
         now = time.monotonic()
         if posted:
             log.info("답 알림 %d개 → 화면 읽기", len(posted))
@@ -390,6 +399,30 @@ class AndroidAdapter(BotAdapter):
             log.info("답 알림 없음 → 화면을 직접 읽음")
             self._signaled = True
         return self._signaled
+
+    def _absorb(self, events: list[dict[str, Any]], cursor: int) -> list[dict[str, Any]]:
+        """알림 이벤트를 반영하고 답 신호가 되는 posted 이벤트만 돌려준다."""
+        self._notif_cursor = cursor
+        progress = set(self.android.progress_channels)
+        answers = []
+        for e in events:
+            d = e.get("data") or {}
+            key = str(d.get("key") or d.get("id"))
+            if d.get("channel") in progress:
+                if e.get("event") == "notif.posted":
+                    self._progress_keys.add(key)
+                else:
+                    self._progress_keys.discard(key)
+            elif e.get("event") == "notif.posted":
+                answers.append(e)
+        return answers
+
+    async def progress_active(self) -> bool:
+        """휴대폰: "작업 중" 알림이 떠 있는지(뮤즈). 이벤트를 기다리지 않고 바로 확인한다."""
+        if not self.phone_mode or not self.android.progress_channels:
+            return False
+        self._absorb(*await self.device.wait_events(self.android.package, self._notif_cursor, 0))
+        return bool(self._progress_keys)
 
     async def open_for_read(self) -> None:
         """휴대폰: 읽기 전에 앱을 전경으로(런처 인텐트. 알림 PendingIntent 는 BAL 에 막힌다)."""

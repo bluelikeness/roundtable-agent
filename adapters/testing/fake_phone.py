@@ -1,9 +1,11 @@
 """가짜 휴대폰 워커. 게이트웨이에 실제 WebSocket 으로 붙어 워커 앱처럼 명령을 수행한다.
 
-화면은 FakeVooyDevice(가짜 Vooy 앱)를 그대로 쓴다. 봇 답이 도착했을 때 Vooy 가 전경이 아니면
-실제 휴대폰처럼 알림 이벤트(notif.posted)를 올린다. 실제 기기·계정·대화 내용은 쓰지 않는다.
+앱 넷을 흉내 낸다: Vooy(FakeVooyDevice), 피클·뮤즈·Cue(FakeChatApp). 전경 앱은 하나이고 launch 로 바뀐다.
+봇 답이 도착했을 때 그 앱이 전경이 아니면 실제 휴대폰처럼 알림 이벤트(notif.posted)를 올린다.
+실제 기기·계정·대화 내용은 쓰지 않는다.
 
-  python -m adapters.testing.fake_phone      env: PHONE_GATEWAY_WS, PHONE_DEVICE_TOKEN, FAKE_PHONE_LOCKED(파일 경로)
+  python -m adapters.testing.fake_phone      env: PHONE_GATEWAY_WS, PHONE_DEVICE_TOKEN, FAKE_PHONE_LOCKED(파일 경로),
+                                                  FAKE_PHONE_DIR(앱 상태 폴더, 기본 /data)
 
 FAKE_PHONE_LOCKED 파일이 있으면 화면이 잠긴 것으로 답한다(잠금 시나리오).
 """
@@ -22,6 +24,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from adapters.phone.protocol import PING_S
+from adapters.testing.fake_chat import FakeChatApp
 from adapters.testing.fake_vooy import PKG as VOOY_PKG
 from adapters.testing.fake_vooy import FakeVooyDevice, Msg
 
@@ -30,11 +33,25 @@ LAUNCHER = "com.google.android.apps.nexuslauncher"
 
 
 class FakePhone:
-    def __init__(self, url: str, token: str, device: FakeVooyDevice | None = None, locked_file: str | None = None):
+    device_name = "fake-phone"  # hello 의 기기 이름(다른 휴대폰 흉내는 인스턴스에서 바꾼다)
+    sdk = 34  # 안드로이드 API 레벨(29 = 안드로이드 10: 스크린샷 없음)
+
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        device: FakeVooyDevice | None = None,
+        locked_file: str | None = None,
+        chat_dir: str | Path | None = None,
+    ):
         self.url = url
         self.token = token
         self.vooy = device or FakeVooyDevice()
         self.vooy.on_bot_message = self._on_bot_message
+        base = Path(chat_dir or os.environ.get("FAKE_PHONE_DIR", "/data"))
+        self.chats = {pkg: FakeChatApp(pkg, base / f"fake-{pkg.split('.')[-1]}") for pkg in ("com.pickle.client", "com.facebook.aura", "ai.manus.agents")}
+        for app in self.chats.values():
+            app.notify = lambda ch, key, posted, app=app: self._chat_notif(app, ch, key, posted)
         self.locked_file = Path(locked_file) if locked_file else None
         self.watch: set[str] = set()
         self.notif_id = 0
@@ -66,6 +83,28 @@ class FakePhone:
         }
         asyncio.get_running_loop().create_task(self._send({"type": "event", "event": "notif.posted", "data": data}))
 
+    def _chat_notif(self, app: FakeChatApp, channel: str, key: str, posted: bool) -> None:
+        if self._ws is None or app.pkg not in self.watch:
+            return
+        if posted and app.foreground and channel != app.p["progress_channel"]:
+            return  # 대화방이 열려 있으면 답 알림이 뜨지 않는다(작업 중 알림은 뜬다)
+        data = {"pkg": app.pkg, "key": f"0|{app.pkg}|{key}", "id": 0, "channel": channel, "template": "MessagingStyle",
+                "title_len": 2, "text_len": 10, "messages": 1, "when_ms": 0, "summary": False}
+        event = "notif.posted" if posted else "notif.removed"
+        asyncio.get_running_loop().create_task(self._send({"type": "event", "event": event, "data": data}))
+
+    def _fg(self):
+        """전경 앱(가짜 기기 객체) 또는 None(홈 화면)."""
+        if self.vooy.foreground:
+            return self.vooy
+        return next((a for a in self.chats.values() if a.foreground), None)
+
+    def _fg_pkg(self) -> str:
+        app = self._fg()
+        if app is None:
+            return LAUNCHER
+        return VOOY_PKG if app is self.vooy else app.pkg
+
     async def _send(self, obj: dict[str, Any]) -> None:
         if self._ws is not None:
             try:
@@ -76,36 +115,80 @@ class FakePhone:
     # --- 명령 -------------------------------------------------------------
 
     async def handle(self, cmd: str, args: dict[str, Any]) -> dict[str, Any]:
-        v = self.vooy
         if cmd == "state":
             return {
                 "screen_on": True,
                 "locked": self.locked,
-                "foreground": VOOY_PKG if v.foreground else LAUNCHER,
+                "foreground": self._fg_pkg(),
                 "battery": 100,
                 "version": "fake",
+                "width": 1080,
+                "height": 2400,
+                "density": 2.625,
+                "ime_top": None,
+                "sdk": self.sdk,
             }
+        if cmd == "app_info":
+            if str(args["pkg"]) not in {VOOY_PKG, *self.chats}:
+                raise RuntimeError(f"설치되지 않은 앱: {args['pkg']}")
+            return {"version_name": "1.0-fake", "version_code": 1}
         if cmd == "watch":
             self.watch = set(args.get("pkgs") or [])
             return {}
         if self.locked:
             raise RuntimeError("화면이 잠겨 있음")
         if cmd == "launch":
-            await v.app_start(str(args["pkg"]))
-            return {"foreground": VOOY_PKG if v.foreground else LAUNCHER}
+            pkg = str(args["pkg"])
+            apps = {VOOY_PKG: self.vooy, **self.chats}
+            if pkg not in apps:
+                raise RuntimeError(f"설치되지 않은 앱: {pkg}")
+            for a in apps.values():
+                a.foreground = False
+            await apps[pkg].app_start(pkg)
+            return {"foreground": self._fg_pkg()}
+        if cmd == "global":
+            for a in (self.vooy, *self.chats.values()):
+                await a.press(str(args["action"]))
+            return {}
+        v = self._fg()
         if cmd == "tree":
+            if v is None:
+                return {"xml": '<?xml version="1.0"?><hierarchy rotation="0"><node class="android.widget.FrameLayout" '
+                        f'package="{LAUNCHER}" bounds="[0,0][1080,2400]" text="" content-desc="Home" resource-id="" clickable="false"/></hierarchy>'}
             return {"xml": await v.dump()}
+        if v is None:
+            raise RuntimeError("전경 앱 없음(홈 화면)")
         if cmd == "tap":
             await v.click(int(args["x"]), int(args["y"]))
             return {}
+        if cmd == "click_at":
+            await v.click(int(args["x"]), int(args["y"]))
+            return {"method": "gesture"}
+        if cmd == "click":
+            from adapters.android_base import parse_hierarchy
+
+            sel = dict(args["selector"])
+            root = parse_hierarchy(await v.dump())
+            import re as _re
+
+            for n in root.walk():
+                if "resourceId" in sel and n.rid != sel["resourceId"]:
+                    continue
+                if "description" in sel and n.desc != sel["description"]:
+                    continue
+                if "descriptionMatches" in sel and not _re.fullmatch(sel["descriptionMatches"], n.desc):
+                    continue
+                if "className" in sel and n.cls != sel["className"]:
+                    continue
+                x, y = n.bounds.center
+                await v.click(x, y)
+                return {"method": "action"}
+            raise RuntimeError("누를 노드를 찾지 못함")
         if cmd == "set_text":
             await v.set_text(dict(args["selector"]), str(args["text"]))
             return {}
         if cmd == "paste":
             await v.send_keys(str(args["text"]))
-            return {}
-        if cmd == "global":
-            await v.press(str(args["action"]))
             return {}
         if cmd == "screenshot":
             return {"png_b64": base64.b64encode(await v.screenshot_png()).decode()}
@@ -116,7 +199,7 @@ class FakePhone:
     async def run_once(self) -> None:
         async with connect(self.url, additional_headers={"Authorization": f"Bearer {self.token}"}) as ws:
             self._ws = ws
-            await ws.send(json.dumps({"type": "hello", "device": "fake-phone", "version": "fake"}))
+            await ws.send(json.dumps({"type": "hello", "device": self.device_name, "version": "fake", "sdk": self.sdk, "android": str(self.sdk - 20)}))
             self.connected.set()
             pinger = asyncio.get_running_loop().create_task(self._ping())
             try:

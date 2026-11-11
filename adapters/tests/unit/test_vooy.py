@@ -62,6 +62,7 @@ async def vooy(tmp_path, monkeypatch):
     a.android.app_start_wait_s = 1
     a.SEND_SETTLE_S = 0
     a.SEND_CHECK_S = 0.05
+    a.SEND_CONFIRM_S = 0.3
     return a
 
 

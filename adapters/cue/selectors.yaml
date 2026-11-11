@@ -1,0 +1,29 @@
+# Cue(Manus, ai.manus.agents) 셀렉터. 앱이 바뀌면 이 파일만 고친다(adapters/phonechat.py 키 설명).
+# 기준: 실기기(2026-11-11). Flutter 앱이라 resource-id 가 없고 말풍선 글이 content-desc 에 있다.
+text_from_desc: true
+input: {cls: EditText}
+input_u2: {className: android.widget.EditText}
+# Flutter: 입력창을 탭해 포커스를 줘야 넣은 글이 실제로 들어간다(안 그러면 마이크가 그대로)
+focus_input: true
+# 전송 버튼은 이름 없는 ↑ 버튼이다(2026-11-11 실기기 26.18.14). 글이 없으면 입력줄 오른쪽 끝이 마이크(누르면
+# 음성 모드)이고, 글을 넣으면 마이크가 왼쪽으로 밀리고 그 자리에 ↑ 가 생긴다. 트리에서는 ↑ 와 옛 마이크가 같은
+# 자리·같은 클래스라 구분되지 않는다 → 좌표로 누르지 않고, 기본 셀렉터 없이 일반 규칙(그림 비교)으로만 찾는다
+send: []
+# 스크린샷이 없는 휴대폰(안드로이드 10 이하)용 트리 규칙: 글을 넣은 뒤 입력줄 버튼이 딱 하나 늘고 원래 맨 오른쪽
+# 자리에 버튼이 그대로 있으면 그 맨 오른쪽이 ↑(마이크는 왼쪽으로 밀린다). 2026-11-12 노트9·안드로이드 10 확인
+send_tree_rule: rightmost_when_row_grows
+# 앱을 다시 열면 입력줄이 "길게 눌러 말하기, 탭하여 입력" 버튼이다(탭 = 글 입력 모드, 길게 = 음성).
+# 대화 목록이 나오면 에이전트 대화방(사용자가 만든 에이전트)을 누른다. 다른 에이전트를 쓰려면
+# 이름만 바꾼다. 목록 항목의 content-desc 첫 줄이 에이전트 이름이다. 입력줄 버튼을 먼저 둔다(대화방 머리글이
+# 에이전트 이름과 같을 수 있다)
+chat_tabs:
+  - {desc_re: "탭하여 입력|[Tt]ap to (type|input)", clickable: true}
+  - {desc_re: "^my-agent(\n|$)", clickable: true}
+# 시각은 "오후 7:20"·"7:20 오후"·"7:20 PM" 모두 답이 아니다
+exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*([AaPp][Mm]|오전|오후))?\s*$|^\s*\d{1,2}월\s*\d{1,2}일|^(오늘|어제|Today|Yesterday)$'
+exclude_button_re: '^(뒤로|Agent 프로필)'
+confirm_button_re: '(결제|구매|확정|Pay|Confirm)'
+login_markers:
+  - 로그인
+  - Sign in
+  - Log in

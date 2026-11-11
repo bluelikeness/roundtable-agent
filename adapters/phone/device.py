@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import os
 from typing import Any
@@ -40,6 +41,7 @@ class PhoneDevice:
         self._lease: str | None = None
         self._lease_lock = asyncio.Lock()
         self._busy = 0
+        self._held = 0
         self._idle_task: asyncio.Task | None = None
 
     # --- HTTP -------------------------------------------------------------
@@ -99,11 +101,23 @@ class PhoneDevice:
 
         async def later() -> None:
             await asyncio.sleep(self.IDLE_RELEASE_S)
-            if self._busy == 0:
+            if self._busy == 0 and self._held == 0:
                 self._idle_task = None
                 await self.release()
 
         self._idle_task = asyncio.get_running_loop().create_task(later())
+
+    @contextlib.asynccontextmanager
+    async def hold(self):
+        """여러 명령을 한 묶음으로 화면을 잡는다(앱 열기 → 읽기 사이에 다른 봇이 끼어들지 않게)."""
+        self._held += 1
+        try:
+            await self._ensure_lease()
+            yield
+        finally:
+            self._held -= 1
+            if self._held == 0:
+                self._schedule_idle_release()
 
     async def _screen(self, cmd: str, args: dict[str, Any] | None = None, timeout_s: float = 15) -> dict:
         self._busy += 1
@@ -150,6 +164,24 @@ class PhoneDevice:
     async def click(self, x: int, y: int) -> None:
         await self._screen("tap", {"x": int(x), "y": int(y)})
 
+    async def click_selector(self, selector: dict[str, str]) -> str:
+        """셀렉터로 찾은 노드를 접근성 클릭. 사용한 방법(action|gesture)."""
+        return str((await self._screen("click", {"selector": selector})).get("method"))
+
+    async def click_at(self, x: int, y: int) -> str:
+        """그 위치의 누를 수 있는 노드를 접근성 클릭(이름 없는 버튼). 사용한 방법(action|gesture)."""
+        return str((await self._screen("click_at", {"x": int(x), "y": int(y)})).get("method"))
+
+    async def app_version(self, package: str) -> str | None:
+        """설치된 앱 버전(versionName). 옛 워커·앱 없음이면 None(셀렉터 기기별 층이 버전 없이 묶인다)."""
+        try:
+            r = await self._rpc("app_info", {"pkg": package}, timeout_s=10)
+        except Exception as e:  # noqa: BLE001 - 버전은 있으면 좋은 정보다. 전송을 막지 않는다
+            log.info("앱 버전 확인 실패(%s): %s", package, e)
+            return None
+        name = r.get("version_name")
+        return f"{name}({r.get('version_code')})" if name else None
+
     async def set_text(self, selector: dict[str, str], text: str) -> None:
         await self._screen("set_text", {"selector": selector, "text": text})
 
@@ -174,22 +206,38 @@ class PhoneDevice:
 
     # --- 알림 -------------------------------------------------------------
 
+    async def device_profile(self) -> dict[str, Any]:
+        """붙어 있는 휴대폰의 {device, sdk, android}. 기기별 층의 열쇠와 기기 능력 판단(스크린샷 등)에 쓴다.
+
+        sdk 를 모르면(옛 워커) None. 실패해도 예외 대신 빈 값을 돌려준다(전송을 막지 않는다).
+        """
+        try:
+            r = await self._req("GET", "/state")
+            st = r.json() if r.status_code == 200 else {}
+        except Exception as e:  # noqa: BLE001
+            log.info("휴대폰 정보 확인 실패: %s", e)
+            st = {}
+        return {"device": st.get("device"), "sdk": st.get("sdk"), "android": st.get("android")}
+
     async def events_cursor(self) -> int:
         r = await self._req("GET", "/state")
         if r.status_code != 200:
             raise BackendDown(f"폰 게이트웨이 상태: {_error(r)}")
         return int(r.json().get("event_seq") or 0)
 
-    async def wait_notification(self, pkg: str, after: int, wait_s: float) -> tuple[list[dict[str, Any]], int]:
-        """after 이후 pkg 의 notif.posted 이벤트(요약 알림 제외)와 새 커서."""
+    async def wait_events(self, pkg: str, after: int, wait_s: float) -> tuple[list[dict[str, Any]], int]:
+        """after 이후 pkg 의 알림 이벤트(notif.posted·notif.removed, 요약 알림 제외)와 새 커서."""
         r = await self._req("GET", "/events", params={"after": after, "pkg": pkg, "wait_s": max(0.0, wait_s)})
         if r.status_code != 200:
             raise BackendDown(f"폰 게이트웨이 이벤트: {_error(r)}")
-        body = r.json()
-        evs = body.get("events") or []
+        evs = r.json().get("events") or []
         cursor = max([after, *[int(e["seq"]) for e in evs]])
-        posted = [e for e in evs if e.get("event") == "notif.posted" and not (e.get("data") or {}).get("summary")]
-        return posted, cursor
+        return [e for e in evs if not (e.get("data") or {}).get("summary")], cursor
+
+    async def wait_notification(self, pkg: str, after: int, wait_s: float) -> tuple[list[dict[str, Any]], int]:
+        """after 이후 pkg 의 notif.posted 이벤트(요약 알림 제외)와 새 커서."""
+        evs, cursor = await self.wait_events(pkg, after, wait_s)
+        return [e for e in evs if e.get("event") == "notif.posted"], cursor
 
     async def aclose(self) -> None:
         await self.release()

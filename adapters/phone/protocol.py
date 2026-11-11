@@ -28,12 +28,17 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "launch": ("{pkg}", "{foreground}  런처 인텐트로 연다(알림 PendingIntent 는 BAL 에 막힌다)"),
     "tree": ("{}", "{xml}  uiautomator dump 와 같은 형식(class·resource-id·content-desc·text·package·clickable·bounds)"),
     "tap": ("{x, y}", "{}"),
+    "click": ("{selector}", "{method}  셀렉터(set_text 와 같은 키)로 찾은 노드에 접근성 클릭, 안 되면 좌표 탭"),
+    "click_at": ("{x, y}", "{method}  그 위치를 덮는 가장 작은 누를 수 있는 노드에 접근성 클릭, 없으면 좌표 탭"),
     "set_text": ("{selector, text}", "{}  selector 키: description·descriptionMatches·text·textMatches·resourceId·className"),
     "paste": ("{text}", "{}  포커스된 입력창에 클립보드로 붙여넣고 클립보드를 비운다"),
     "global": ("{action: home|back}", "{}"),
     "screenshot": ("{}", "{png_b64}"),
+    "update_check": ("{}", "{current, latest}  워커가 바로 새 버전을 확인한다(있으면 내려받아 설치)"),
+    "app_info": ("{pkg}", "{version_name, version_code}  설치된 앱 버전(셀렉터 기기별 층의 열쇠). 없으면 오류"),
+    "logs": ("{}", "{text}  워커 화면 기록(명령 이름·상태만, 메시지 내용 없음). 진단용"),
 }
-SCREEN_COMMANDS = frozenset({"launch", "tree", "tap", "set_text", "paste", "global", "screenshot"})
+SCREEN_COMMANDS = frozenset({"launch", "tree", "tap", "click", "click_at", "set_text", "paste", "global", "screenshot"})
 
 # 이벤트 종류
 EVENTS = ("notif.posted", "notif.removed", "state.changed")

@@ -127,6 +127,36 @@ class PhoneVooyDriver(FakeVooyDriver):
 
 
 @dataclass
+class PhoneChatDriver(MockDriver):
+    """피클·뮤즈 어댑터(범용 채팅 앱) + 가짜 휴대폰의 가짜 채팅 앱(adapters/testing/fake_chat.py)."""
+
+    shared_thread: bool = True  # 앱의 대화방 하나를 쓴다
+    phone_service: str = "fake-phone"
+    app_dir: str = ""  # 가짜 휴대폰 안 앱 상태 폴더
+
+    def normal_text(self, s: str) -> str:
+        return s
+
+    def slow_text(self, s: str) -> str:
+        return f"[chat:slow] {s}"
+
+    def buttons_text(self) -> str:
+        return "[chat:buttons] 강남 식당 추천해줘"
+
+    def confirm_text(self) -> str:
+        return "[chat:confirm] 기차표 결제해줘"
+
+    def image_text(self) -> str | None:
+        return None  # 이미지는 범용 채팅 어댑터가 아직 뽑지 않는다
+
+    def expire_login(self) -> None:
+        compose("exec", "-T", self.phone_service, "rm", "-f", f"{self.app_dir}/session")
+
+    def restore_login(self) -> None:
+        compose("exec", "-T", self.phone_service, "sh", "-c", f"echo logged-in > {self.app_dir}/session")
+
+
+@dataclass
 class LiveVooyDriver(MockDriver):
     """실제 Vooy(에뮬레이터 + 로그인된 앱). 사람이 CONTRACT_TARGETS=vooy 로 돌린다.
 
@@ -188,12 +218,20 @@ KNOWN = {
     "vooy-fake": (9004, 9104),
     "vooy": (9005, 9105),
     "vooy-phone": (9006, 9106),
+    "pickle-phone": (9009, 9109),
+    "muse-phone": (9010, 9110),
 }
-DRIVERS = {"vooy-fake": FakeVooyDriver, "vooy": LiveVooyDriver, "vooy-phone": PhoneVooyDriver}
+DRIVERS = {
+    "vooy-fake": FakeVooyDriver,
+    "vooy": LiveVooyDriver,
+    "vooy-phone": PhoneVooyDriver,
+    "pickle-phone": lambda service: PhoneChatDriver(service=service, phone_service="fake-phone-pickle", app_dir="/data/fake-client"),
+    "muse-phone": lambda service: PhoneChatDriver(service=service, phone_service="fake-phone-muse", app_dir="/data/fake-aura"),
+}
 
 
 def _targets() -> list[Target]:
-    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c,vooy-fake,vooy-phone").split(",") if n.strip()]
+    names = [n.strip() for n in os.environ.get("CONTRACT_TARGETS", "mock-a,mock-b,mock-c,vooy-fake,vooy-phone,pickle-phone,muse-phone").split(",") if n.strip()]
     out = []
     for n in names:
         if n not in KNOWN:

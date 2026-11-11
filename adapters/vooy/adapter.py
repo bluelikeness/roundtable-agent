@@ -69,6 +69,8 @@ class VooyAdapter(AndroidAdapter):
     SEND_SETTLE_S = 0.5
     SEND_CHECK_S = 1.0
     SEND_TRIES = 3
+    SEND_FIRST_CHECK_S = 0.3
+    SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(다시 누르기 전)
     # _ensure_ready 의 덤프를 _send 가 다시 쓰는 최대 나이
     TREE_REUSE_S = 5.0
 
@@ -81,6 +83,7 @@ class VooyAdapter(AndroidAdapter):
         self._exclude_btn_re = re.compile(s["exclude_button_desc_re"]) if s.get("exclude_button_desc_re") else None
         self._confirm_re = re.compile(s["confirm_button_re"]) if s.get("confirm_button_re") else None
         self._typing_tab_re = re.compile(s["typing_tab_desc_re"]) if s.get("typing_tab_desc_re") else None
+        self._idle_tab_re = re.compile(s["idle_tab_desc_re"]) if s.get("idle_tab_desc_re") else None
         self._daily_path = self.state_dir / "daily.json"
         # 현재 왕복(큐가 직렬이라 하나뿐): 기준 말풍선 목록·보낸 본문·대상 스레드
         self._baseline: set[tuple[str, str]] = set()
@@ -178,6 +181,10 @@ class VooyAdapter(AndroidAdapter):
         self._daily_path.write_text(json.dumps({"date": today, "count": count}), encoding="utf-8")
 
     async def _send(self, thread: Thread, text: str, tap: str | None) -> None:
+        async with self.screen():
+            await self._send_locked(thread, text, tap)
+
+    async def _send_locked(self, thread: Thread, text: str, tap: str | None) -> None:
         self._check_daily()
         self._thread = thread
         if self.phone_mode and await self.device.current_package() != self.android.package:
@@ -205,18 +212,18 @@ class VooyAdapter(AndroidAdapter):
             # 키보드가 올라오면 입력창이 위로 움직이지만 set_text 는 좌표가 아닌 셀렉터로 찾는다.
             # 화면을 다시 덤프하지 않는다(조회 한 번이 수 초라 sending 단계 시간을 다 쓴다)
             await self.input_text(self.sel["input_u2"], body)
-            await self._tap_send()
+            confirmed = await self._tap_send(body)
             self._sent_norm = _norm(body)
             self._count_daily()
         self._tree_cache = None
         replied = False
         if self.phone_mode and self._sent_norm:
-            # 홈으로 나가기 전에 이미 답이 왔는지. 대화방이 열려 있는 동안 온 답은 알림이 뜨지 않는다
-            replied = bool(self._new_bubbles(await self._tree()))
-            self._tree_cache = None
+            # 답은 알림으로 안다. 대화방이 열려 있는 동안 온 답은 알림이 뜨지 않으므로 전송이 확인되면 바로
+            # 홈으로 나간다. 화면을 더 읽지 않고, 전송을 확인한 그 화면에 답이 벌써 있는지만 본다
+            replied = bool(self._new_bubbles(confirmed))
         await self.after_send(already_replied=replied)
 
-    async def _tap_send(self) -> None:
+    async def _tap_send(self, body: str = "") -> UiNode:
         """전송 버튼을 누르고 입력창이 비었는지로 전송을 확인한다.
 
         set_text 직후 바로 누르면 RN 이 입력값을 아직 반영하지 않아 눌러도 아무 일이 없다
@@ -225,18 +232,43 @@ class VooyAdapter(AndroidAdapter):
         """
         await asyncio.sleep(self.SEND_SETTLE_S)
         root = await self._tree()  # 키보드가 올라온 뒤의 버튼 위치
+        before = len(self._own_bubbles_with(root, body))
         for _ in range(self.SEND_TRIES):
             send = root.find(**self.sel["send"])
             if send is None:
                 raise BackendDown("전송 버튼 없음")
             await self.tap(send)
-            await asyncio.sleep(self.SEND_CHECK_S)
-            # 확인용 덤프를 다음 시도의 버튼 위치로도 쓴다(전송 성공 시 덤프 2번)
-            root = await self._tree()
-            field = root.find(**self.sel["input"])
-            if field is None or not field.text.strip():
-                return
+            # 느린 휴대폰(2026-11-12 갤럭시 노트9)은 말풍선·입력창이 접근성 트리에 몇 초 늦게 반영된다.
+            # 한 번만 보고 다시 누르면 이미 보낸 뒤라 헛누름이 되고 실패로 끝난다 → 잠시 여러 번 본다
+            loop = asyncio.get_running_loop()
+            until = loop.time() + max(self.SEND_CHECK_S, self.SEND_CONFIRM_S)
+            first = True
+            while True:
+                # 첫 확인은 짧게(전송이 확인되는 대로 앱을 떠나야 답 알림이 뜬다)
+                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else self.SEND_CHECK_S)
+                first = False
+                # 확인용 덤프를 다음 시도의 버튼 위치로도 쓴다
+                self._tree_cache = None
+                root = await self._tree()
+                # 내 말풍선이 생겼으면 전송된 것이다. 휴대폰 Vooy 는 전송 뒤에도 접근성 트리의 입력창 글자가
+                # 늦게 지워져(2026-11-11 실기기) 입력창만 보면 다시 누르게 된다
+                if len(self._own_bubbles_with(root, body)) > before:
+                    return root
+                field = root.find(**self.sel["input"])
+                if field is None or not field.text.strip():
+                    return root
+                if loop.time() >= until:
+                    break
         raise BackendDown(f"전송 버튼을 {self.SEND_TRIES}번 눌러도 입력창이 비지 않음")
+
+    def _own_bubbles_with(self, root: UiNode, body: str) -> list[UiNode]:
+        want = _norm(body)
+        out = []
+        for o in self._bubbles(root, self.sel["own_bubble"]):
+            got = _norm(self._bubble_text(o)[0])
+            if got and (got == want or (len(got) >= 20 and want.startswith(got[:20]))):
+                out.append(o)
+        return out
 
     def _find_button(self, root: UiNode, label: str) -> UiNode | None:
         """직전 응답 영역의 버튼. 같은 라벨이 여럿이면 가장 아래(최신)."""
@@ -250,8 +282,11 @@ class VooyAdapter(AndroidAdapter):
     async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]:
         if not await self.reply_signal(deadline):
             return []  # 휴대폰: 답 알림 전에는 화면을 열지 않는다
-        await self.open_for_read()
-        root = await self._tree()
+        async with self.screen():
+            await self.open_for_read()
+            root = await self._tree()
+        if self.phone_mode and not any(n.package == self.android.package for n in root.walk()):
+            return []  # 다른 앱 화면(다음 폴링에서 다시)
         new = self._new_bubbles(root)
 
         msgs: list[RawMessage] = []
@@ -324,10 +359,11 @@ class VooyAdapter(AndroidAdapter):
         for rid in self.sel.get("streaming_rids") or []:
             if root.find(rid=rid) is not None:
                 return True
-        if self._typing_tab_re is not None:
-            tab = root.find(**self.sel["home_tab"])
-            if tab is not None and self._typing_tab_re.search(tab.desc):
-                return True
+        tab = root.find(**self.sel["home_tab"])
+        if tab is not None and self._typing_tab_re is not None and self._typing_tab_re.search(tab.desc):
+            return True
+        if tab is not None and self._idle_tab_re is not None and tab.desc and not self._idle_tab_re.search(tab.desc):
+            return True  # 쉬는 중 표시가 아니면 응답 중
         return False
 
     # --- 훅: 추출 ----------------------------------------------------------

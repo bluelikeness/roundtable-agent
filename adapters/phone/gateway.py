@@ -8,9 +8,16 @@
   POST /lease                   {holder, wait_s, ttl_s} → {lease}. 화면 임대(봇 셋이 화면 하나를 나눠 쓴다)
   POST /lease/{id}/renew, DELETE /lease/{id}
   GET  /events?after=&pkg=&wait_s=   알림 이벤트 롱폴링
+  POST /apk/link                한 번만 쓰는 APK 다운로드 경로를 만든다(QR 설치용, 30분)
+
+  워커 앱 배포(공개 경로, Caddy·nginx 가 /phone/ 아래만 넘긴다)
+  GET  /phone/apk/latest.json   최신 버전 정보. 기기 토큰(Bearer)
+  GET  /phone/apk/download      최신 APK. 기기 토큰(Bearer). 워커 자동 업데이트가 쓴다
+  GET  /phone/apk/once/{code}   한 번만 쓰는 다운로드(브라우저 설치용). APK 안에 기기 토큰이 있어 공개 링크를 두지 않는다
 
 내부 API 는 어댑터와 같은 X-Hub-Token 을 요구한다. 기기 토큰과 허브 토큰은 다르다.
-휴대폰은 한 대만 붙는다. 새 연결이 오면 이전 연결을 끊는다(재연결 중 끊긴 소켓이 남는 경우).
+휴대폰은 한 대만 붙는다. 같은 휴대폰의 새 연결은 이전 연결을 끊고 대신한다(재연결 중 끊긴 소켓이 남는 경우).
+같은 토큰의 다른 휴대폰은 지금 휴대폰이 살아 있는 동안 4423 으로 돌려보낸다(서로 밀어내기 방지).
 """
 
 from __future__ import annotations
@@ -30,7 +37,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -56,6 +63,8 @@ class PhoneLink:
     ws: WebSocket
     device: str
     version: str
+    sdk: int | None = None  # 안드로이드 API 레벨(hello 에 없으면 None: 옛 워커)
+    android: str | None = None
     last_seen: float = field(default_factory=time.monotonic)
     pending: dict[int, asyncio.Future] = field(default_factory=dict)
     next_id: int = 1
@@ -186,9 +195,14 @@ class EventLog:
 
 
 class Gateway:
-    def __init__(self, hub_token: str, device_token: str, watch_pkgs: list[str]):
+    APK_NAME = "multibot-worker.apk"
+    ONCE_TTL_S = 30 * 60
+
+    def __init__(self, hub_token: str, device_token: str, watch_pkgs: list[str], apk_dir: str | Path | None = None):
         if not device_token:
             raise ValueError("기기 토큰 없이 기동하지 않습니다(PHONE_DEVICE_TOKEN)")
+        self.apk_dir = Path(apk_dir) if apk_dir else None
+        self._once: dict[str, float] = {}  # 한 번만 쓰는 다운로드 코드 → 만료 시각
         self.hub_token = hub_token
         self.device_token = device_token.encode()
         self.watch_pkgs = watch_pkgs
@@ -196,6 +210,7 @@ class Gateway:
         self.leases = Leases()
         self.events = EventLog()
         self._reaper: asyncio.Task | None = None
+        self._busy_logged = -1e9
 
     # --- 휴대폰 WebSocket -------------------------------------------------
 
@@ -214,15 +229,42 @@ class Gateway:
         if hello.get("type") != "hello":
             await ws.close(code=4400)
             return
-        link = PhoneLink(ws, str(hello.get("device") or "phone"), str(hello.get("version") or "?"))
-        old, self.link = self.link, link
+        sdk = hello.get("sdk")
+        link = PhoneLink(
+            ws,
+            str(hello.get("device") or "phone"),
+            str(hello.get("version") or "?"),
+            sdk=int(sdk) if isinstance(sdk, int) else None,
+            android=str(hello["android"]) if hello.get("android") else None,
+        )
+        old = self.link
+        if (
+            old is not None
+            and not old.closed
+            and old.device != link.device
+            and time.monotonic() - old.last_seen < DEAD_AFTER_S
+        ):
+            # 같은 토큰을 가진 다른 휴대폰. 새 연결이 이전 연결을 끊으면 두 휴대폰이 서로 밀어내며 끝없이
+            # 재연결한다 → 살아 있는 쪽을 지키고 새로 온 쪽을 돌려보낸다(같은 휴대폰의 재연결은 아래처럼 교체)
+            now = time.monotonic()
+            if now - self._busy_logged > 60:
+                self._busy_logged = now
+                log.warning("다른 휴대폰 연결 거절: %s (이미 %s 연결 중)", link.device, old.device)
+            with contextlib.suppress(Exception):
+                await ws.close(code=4423, reason="other phone connected")
+            return
+        self.link = link
         if old is not None:
             old.fail_all("새 연결로 교체됨")
             try:
                 await old.ws.close(code=4409)
             except Exception:  # noqa: BLE001 - 이미 끊긴 소켓
                 pass
-        log.info("휴대폰 연결: %s (워커 %s)", link.device, link.version)
+        log.info("휴대폰 연결: %s (안드로이드 %s, 워커 %s)", link.device, link.android or "?", link.version)
+        if hello.get("last_error"):
+            log.warning("휴대폰이 알린 직전 끊김 이유: %s", str(hello["last_error"])[:300])
+        if hello.get("crash"):
+            log.error("휴대폰 워커 앱 충돌 기록:%s%s", chr(10), str(hello["crash"])[:4000])
         await self.events.add("state.changed", {"connected": True, "device": link.device})
         if self.watch_pkgs:
             asyncio.get_running_loop().create_task(self._watch(link))
@@ -281,6 +323,8 @@ class Gateway:
                 "connected": link is not None and not link.closed,
                 "device": link.device if link else None,
                 "version": link.version if link else None,
+                "sdk": link.sdk if link else None,
+                "android": link.android if link else None,
                 "last_seen_s": round(time.monotonic() - link.last_seen, 1) if link else None,
                 "lease_holder": holder,
                 "event_seq": self.events.seq,
@@ -337,6 +381,63 @@ class Gateway:
         got = await self.events.wait(after, q.get("pkg") or None, wait_s)
         return JSONResponse({"events": got, "last": self.events.seq})
 
+    # --- 워커 앱 배포 -----------------------------------------------------
+
+    def _device_ok(self, request: Request) -> bool:
+        auth = request.headers.get("authorization", "")
+        got = auth[7:].encode() if auth.lower().startswith("bearer ") else b""
+        return hmac.compare_digest(got, self.device_token)
+
+    def _latest(self) -> dict[str, Any] | None:
+        if self.apk_dir is None:
+            return None
+        meta, apk = self.apk_dir / "latest.json", self.apk_dir / self.APK_NAME
+        if not meta.is_file() or not apk.is_file():
+            return None
+        try:
+            return json.loads(meta.read_text(encoding="utf-8"))
+        except ValueError:
+            return None
+
+    async def apk_latest(self, request: Request) -> Response:
+        if not self._device_ok(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        latest = self._latest()
+        if latest is None:
+            return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
+        return JSONResponse(latest)
+
+    async def apk_download(self, request: Request) -> Response:
+        if not self._device_ok(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return self._apk_file()
+
+    async def apk_once(self, request: Request) -> Response:
+        code = request.path_params["code"]
+        now = time.monotonic()
+        self._once = {k: v for k, v in self._once.items() if v > now}
+        exp = self._once.pop(code, None)  # 한 번 쓰면 사라진다
+        if exp is None:
+            return JSONResponse({"error": "만료됐거나 이미 쓴 링크"}, status_code=404)
+        return self._apk_file()
+
+    def _apk_file(self) -> Response:
+        if self._latest() is None:
+            return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
+        return FileResponse(
+            self.apk_dir / self.APK_NAME,
+            media_type="application/vnd.android.package-archive",
+            filename=self.APK_NAME,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def apk_link(self, request: Request) -> JSONResponse:
+        if self._latest() is None:
+            return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
+        code = secrets.token_urlsafe(24)
+        self._once[code] = time.monotonic() + self.ONCE_TTL_S
+        return JSONResponse({"path": f"/phone/apk/once/{code}", "expires_in_s": self.ONCE_TTL_S, "latest": self._latest()})
+
     # --- 조립 -------------------------------------------------------------
 
     def app(self):
@@ -348,10 +449,18 @@ class Gateway:
             finally:
                 self._reaper.cancel()
 
+        public = Starlette(
+            routes=[
+                Route("/phone/apk/latest.json", self.apk_latest),
+                Route("/phone/apk/download", self.apk_download),
+                Route("/phone/apk/once/{code}", self.apk_once),
+            ]
+        )
         inner = Starlette(
             routes=[
                 WebSocketRoute("/phone/ws", self.phone_ws),
                 Route("/state", self.state),
+                Route("/apk/link", self.apk_link, methods=["POST"]),
                 Route("/rpc", self.rpc, methods=["POST"]),
                 Route("/lease", self.lease_acquire, methods=["POST"]),
                 Route("/lease/{lease}/renew", self.lease_renew, methods=["POST"]),
@@ -360,14 +469,27 @@ class Gateway:
             ],
             lifespan=lifespan,
         )
-        # HubTokenGuard 는 http 만 검사한다. 휴대폰 WebSocket 은 위에서 기기 토큰으로 따로 검사한다
-        return HubTokenGuard(inner, self.hub_token)
+        # HubTokenGuard 는 http 만 검사한다. 휴대폰 WebSocket 은 위에서 기기 토큰으로 따로 검사한다.
+        # /phone/apk/ 는 휴대폰·브라우저가 쓰는 공개 경로라 허브 토큰 대신 기기 토큰·일회용 코드로 검사한다
+        guarded = HubTokenGuard(inner, self.hub_token)
+
+        async def dispatch(scope, receive, send):
+            if scope["type"] == "http" and scope.get("path", "").startswith("/phone/apk/"):
+                await public(scope, receive, send)
+            else:
+                await guarded(scope, receive, send)
+
+        return dispatch
 
 
 def read_device_token() -> str:
     path = Path(os.environ.get("PHONE_DEVICE_TOKEN_FILE", "/run/secrets/phone_device_token"))
     token = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
     return token or os.environ.get("PHONE_DEVICE_TOKEN", "").strip()
+
+
+def apk_dir_from_env() -> str | None:
+    return os.environ.get("PHONE_APK_DIR") or None
 
 
 def watch_pkgs_from_env() -> list[str]:
