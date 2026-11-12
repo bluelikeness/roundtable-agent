@@ -35,6 +35,7 @@ LAUNCHER = "com.google.android.apps.nexuslauncher"
 class FakePhone:
     device_name = "fake-phone"  # hello 의 기기 이름(다른 휴대폰 흉내는 인스턴스에서 바꾼다)
     sdk = 34  # 안드로이드 API 레벨(29 = 안드로이드 10: 스크린샷 없음)
+    secure = True  # 보안 잠금(PIN 등). 거짓이면 wake 가 화면을 켜고 잠금화면을 넘긴다
 
     def __init__(
         self,
@@ -57,13 +58,16 @@ class FakePhone:
         self.notif_id = 0
         self._ws = None
         self.handled: list[str] = []  # 받은 명령 이름(테스트에서 확인)
+        self.screen = True  # 화면 켜짐
+        self.keyguard = False  # 잠금화면(보안 잠금 없이 화면이 꺼졌다 켜진 경우)
+        self.screen_offs = 0  # lock_screen 으로 끈 횟수
         self.connected = asyncio.Event()
 
     # --- 상태 -------------------------------------------------------------
 
     @property
     def locked(self) -> bool:
-        return self.locked_file is not None and self.locked_file.exists()
+        return self.keyguard or (self.locked_file is not None and self.locked_file.exists())
 
     def _on_bot_message(self, m: Msg) -> None:
         if self.vooy.foreground or VOOY_PKG not in self.watch or self._ws is None:
@@ -117,8 +121,9 @@ class FakePhone:
     async def handle(self, cmd: str, args: dict[str, Any]) -> dict[str, Any]:
         if cmd == "state":
             return {
-                "screen_on": True,
+                "screen_on": self.screen,
                 "locked": self.locked,
+                "secure": self.secure,
                 "foreground": self._fg_pkg(),
                 "battery": 100,
                 "version": "fake",
@@ -135,7 +140,19 @@ class FakePhone:
         if cmd == "watch":
             self.watch = set(args.get("pkgs") or [])
             return {}
-        if self.locked:
+        if cmd == "wake":
+            woke = False
+            if not self.secure and (not self.screen or self.locked):
+                woke = True
+                self.screen, self.keyguard = True, False
+                if self.locked_file is not None and self.locked_file.exists():
+                    self.locked_file.unlink()
+            return {"screen_on": self.screen, "locked": self.locked, "secure": self.secure, "woke": woke}
+        if cmd == "global" and args.get("action") == "lock_screen":
+            self.screen, self.keyguard = False, True
+            self.screen_offs += 1
+            return {}
+        if self.locked or not self.screen:
             raise RuntimeError("화면이 잠겨 있음")
         if cmd == "launch":
             pkg = str(args["pkg"])

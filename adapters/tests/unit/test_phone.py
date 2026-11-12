@@ -424,3 +424,42 @@ def test_is_own_only_accepts_timestamp_prefix():
     assert is_own("오늘 날씨 오후 3:05", "오늘 날씨")
     assert not is_own("echo: 오늘 날씨", "오늘 날씨")
     assert not is_own("네, 오늘 날씨", "오늘 날씨")
+
+
+async def test_wakes_screen_without_secure_lock_and_turns_it_off_after(vooy_phone):
+    """보안 잠금이 없는 휴대폰: 화면이 꺼져 잠금화면이어도 가용이고, 화면을 쓸 때 깨운 뒤 다 쓰면 다시 끈다."""
+    a, gw, phone = vooy_phone
+    gw.screen_off_after_s = 0.3
+    phone.secure = False
+    phone.screen, phone.keyguard = False, True
+    assert await a.device.is_booted()  # 꺼져 있어도 깨울 수 있으니 가용
+    res = await a.ask("오늘 날씨", "t1", timeout_s=30)
+    assert res.ok and res.raw == "echo: 오늘 날씨", res
+    assert "wake" in phone.handled
+    for _ in range(40):
+        if phone.screen_offs:
+            break
+        await asyncio.sleep(0.1)
+    assert phone.screen_offs >= 1 and not phone.screen  # 우리가 켠 화면은 다 쓴 뒤 끈다
+
+
+async def test_screen_on_by_user_is_not_turned_off(vooy_phone):
+    """사람이 켜 둔 화면(우리가 깨우지 않음)은 다 써도 끄지 않는다."""
+    a, gw, phone = vooy_phone
+    gw.screen_off_after_s = 0.2
+    phone.secure = False
+    res = await a.ask("오늘 날씨", "t1", timeout_s=30)
+    assert res.ok, res
+    await asyncio.sleep(0.6)
+    assert phone.screen_offs == 0 and phone.screen
+
+
+async def test_secure_lock_is_never_woken(vooy_phone):
+    """보안 잠금(PIN 등)이 있으면 깨우지 않고 사용할 수 없다고 본다."""
+    a, _, phone = vooy_phone
+    phone.secure = True
+    phone.screen, phone.keyguard = False, True
+    assert not await a.device.is_booted()
+    res = await a.ask("안녕", "t1", timeout_s=20)
+    assert not res.ok and res.error == "unavailable"
+    assert phone.screen is False

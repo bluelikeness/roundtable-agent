@@ -198,7 +198,14 @@ class Gateway:
     APK_NAME = "multibot-worker.apk"
     ONCE_TTL_S = 30 * 60
 
-    def __init__(self, hub_token: str, device_token: str, watch_pkgs: list[str], apk_dir: str | Path | None = None):
+    def __init__(
+        self,
+        hub_token: str,
+        device_token: str,
+        watch_pkgs: list[str],
+        apk_dir: str | Path | None = None,
+        screen_off_after_s: float = 0,
+    ):
         if not device_token:
             raise ValueError("기기 토큰 없이 기동하지 않습니다(PHONE_DEVICE_TOKEN)")
         self.apk_dir = Path(apk_dir) if apk_dir else None
@@ -211,6 +218,10 @@ class Gateway:
         self.events = EventLog()
         self._reaper: asyncio.Task | None = None
         self._busy_logged = -1e9
+        # 화면 다시 끄기: wake 로 우리가 켠 화면만, 화면 임대가 모두 끝나고 이만큼 지나면 끈다(0 이면 끄지 않음)
+        self.screen_off_after_s = screen_off_after_s
+        self._woke_by_us = False
+        self._off_task: asyncio.Task | None = None
 
     # --- 휴대폰 WebSocket -------------------------------------------------
 
@@ -354,12 +365,17 @@ class Gateway:
             return JSONResponse({"error": str(e)}, status_code=422)
         if cmd in SCREEN_COMMANDS:
             self.leases.renew(lease, float(body.get("ttl_s") or 30))
+        if cmd == "wake" and result.get("woke"):
+            self._woke_by_us = True
         return JSONResponse({"result": result})
 
     async def lease_acquire(self, request: Request) -> JSONResponse:
         body = await request.json()
         holder = str(body.get("holder") or "?")
         got = await self.leases.acquire(holder, float(body.get("wait_s") or 0), float(body.get("ttl_s") or 30))
+        if got is not None and self._off_task is not None:
+            self._off_task.cancel()  # 다시 쓴다. 끄지 않는다
+            self._off_task = None
         if got is None:
             cur = self.leases.current
             return JSONResponse({"error": "화면 사용 중", "holder": cur.holder if cur else None}, status_code=409)
@@ -372,7 +388,29 @@ class Gateway:
 
     async def lease_release(self, request: Request) -> JSONResponse:
         ok = await self.leases.release(request.path_params["lease"])
+        if ok:
+            self._schedule_screen_off()
         return JSONResponse({"ok": ok})
+
+    def _schedule_screen_off(self) -> None:
+        if self.screen_off_after_s <= 0 or not self._woke_by_us:
+            return
+        if self._off_task is not None:
+            self._off_task.cancel()
+
+        async def later() -> None:
+            await asyncio.sleep(self.screen_off_after_s)
+            link = self.link
+            if self.leases.current is not None or link is None or link.closed or not self._woke_by_us:
+                return
+            try:
+                await link.call("global", {"action": "lock_screen"}, 10)
+                self._woke_by_us = False
+                log.info("화면 끔(다 쓴 뒤 %ss)", self.screen_off_after_s)
+            except Exception as e:  # noqa: BLE001 - 끄지 못해도 화면은 시간이 지나면 저절로 꺼진다
+                log.info("화면 끄기 실패: %s", e)
+
+        self._off_task = asyncio.get_running_loop().create_task(later())
 
     async def events_poll(self, request: Request) -> JSONResponse:
         q = request.query_params
@@ -490,6 +528,14 @@ def read_device_token() -> str:
 
 def apk_dir_from_env() -> str | None:
     return os.environ.get("PHONE_APK_DIR") or None
+
+
+def screen_off_after_from_env() -> float:
+    """PHONE_SCREEN_OFF_AFTER_S: 우리가 켠 화면을 다 쓴 뒤 끄기까지 초. 0 이면 끄지 않는다(기본 30)."""
+    try:
+        return max(0.0, float(os.environ.get("PHONE_SCREEN_OFF_AFTER_S", "30")))
+    except ValueError:
+        return 30.0
 
 
 def watch_pkgs_from_env() -> list[str]:
