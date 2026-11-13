@@ -437,6 +437,9 @@ class PhoneChatAdapter(AndroidAdapter):
             b = n.bounds
             if not n.clickable or b.empty or n.cls.endswith("EditText") or b.contains(f):
                 continue
+            # 입력창을 감싼 틀은 버튼이 아니다. 긴 글로 입력창이 여러 줄이 되면 틀이 커져 위치가 바뀐다(노트9 Cue)
+            if (b.right - b.left) * 2 > (f.right - f.left):
+                continue
             if b.bottom <= f.top - pad or b.top >= f.bottom + pad or b.center[0] <= cx:
                 continue
             out.append(n)
@@ -480,12 +483,22 @@ class PhoneChatAdapter(AndroidAdapter):
         Cue(2026-11-11·12, 두 기기·안드로이드 10/15 확인): 글을 넣으면 마이크가 왼쪽으로 밀리고 원래 자리에 ↑ 가
         생긴다. 그래서 "입력줄 버튼이 딱 하나 늘었고, 원래 맨 오른쪽 자리에 여전히 버튼이 있으면" 그 맨 오른쪽이
         ↑ 다. 조건이 하나라도 다르면 추측하지 않는다(마이크를 누르면 음성 모드)."""
-        if self.sel.get("send_tree_rule") != "rightmost_when_row_grows" or not self._pre_bounds:
+        if self.sel.get("send_tree_rule") != "rightmost_when_row_grows":
             return None
-        if len(row) != len(self._pre_bounds) + 1:
+        log.info(
+            "트리 규칙: 글 넣기 전 %s / 뒤 %s",
+            self._pre_bounds,
+            [n.bounds.as_tuple() for n in row],
+        )
+        if not self._pre_bounds or len(row) != len(self._pre_bounds) + 1:
             return None
         right = max(row, key=lambda n: (n.bounds.right, n.bounds.top))
-        if right.bounds.as_tuple() != max(self._pre_bounds, key=lambda b: (b[2], b[1])):
+        old = max(self._pre_bounds, key=lambda b: (b[2], b[1]))
+        # 같은 자리: 긴 글로 입력창이 여러 줄이 되면 버튼 줄이 몇 픽셀 옮겨진다(노트9: 938 → 933)
+        cx, cy = right.bounds.center
+        ox, oy = (old[0] + old[2]) // 2, (old[1] + old[3]) // 2
+        tol = max(20, (old[2] - old[0]) // 3)
+        if abs(cx - ox) > tol or abs(cy - oy) > tol:
             return None
         return right
 
