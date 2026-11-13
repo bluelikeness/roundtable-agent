@@ -112,6 +112,7 @@ services:
     command: ["python", "-m", "adapters.phone"]
     environment:
       PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura,ai.manus.agents
+      PHONE_SCREEN_OFF_AFTER_S: ${PHONE_SCREEN_OFF_AFTER_S:-30}
       PHONE_APK_DIR: /srv/phone-dist
     secrets:
       - hub_adapter_token

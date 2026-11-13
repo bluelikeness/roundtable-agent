@@ -79,7 +79,14 @@ class PhoneDevice:
             r = await self._req("POST", "/lease", json={"holder": self.holder, "wait_s": self.lease_wait_s, "ttl_s": self.LEASE_TTL_S})
             if r.status_code != 200:
                 raise BackendDown(f"휴대폰 화면을 받지 못함: {_error(r)}")
-            self._lease = r.json()["lease"]
+            lease = r.json()["lease"]
+            try:
+                await self.wake()  # 화면을 쓰기 시작한다. 꺼져 있으면 깨운다(락 안에서: 깨우기 전에 다른 명령이 쓰지 않게)
+            except BackendDown:
+                with contextlib.suppress(BackendDown):
+                    await self._req("DELETE", f"/lease/{lease}")
+                raise
+            self._lease = lease
             return self._lease
 
     async def release(self) -> None:
@@ -144,13 +151,30 @@ class PhoneDevice:
         return await self._rpc("state", timeout_s=10)
 
     async def is_booted(self) -> bool:
-        """휴대폰이 붙어 있고 화면이 켜져 있으며 잠금이 풀려 있으면 True(조종할 수 있는 상태)."""
+        """조종할 수 있는 상태면 True: 휴대폰이 붙어 있고, 화면이 켜져 잠금이 풀려 있거나 보안 잠금이 없어 깨울 수 있다.
+
+        보안 잠금(PIN·패턴·지문)이 있는데 꺼졌거나 잠겼으면 False(풀지 않는다). secure 를 모르는 옛 워커는 켜짐·풀림만 본다.
+        """
         try:
             st = await self.state()
         except BackendDown as e:
             log.info("휴대폰 상태 확인 실패: %s", e)
             return False
-        return bool(st.get("screen_on")) and not st.get("locked")
+        if st.get("screen_on") and not st.get("locked"):
+            return True
+        return st.get("secure") is False
+
+    async def wake(self) -> None:
+        """화면을 쓰기 전에: 꺼졌거나 잠금화면이면 깨운다. 깨울 수 없으면(보안 잠금 등) BackendDown."""
+        st = await self.state()
+        if st.get("screen_on") and not st.get("locked"):
+            return
+        if st.get("secure") is not False:
+            raise BackendDown("휴대폰 화면이 꺼졌거나 잠겨 있음(보안 잠금은 사람이 풀어야 함)")
+        res = await self._rpc("wake", timeout_s=15)
+        if not (res.get("screen_on") and not res.get("locked")):
+            raise BackendDown("휴대폰 화면을 켜지 못함(잠금화면이 넘어가지 않음)")
+        log.info("휴대폰 화면을 깨움")
 
     async def dump(self) -> str:
         return str((await self._screen("tree", timeout_s=20)).get("xml") or "")

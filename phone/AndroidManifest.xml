@@ -43,6 +43,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 화면 깨우기(명령 wake): 잠금화면 위에 잠깐 뜨는 투명 화면. 보안 잠금은 넘기지 않는다 -->
+        <activity
+            android:name=".WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <receiver
             android:name=".InstallReceiver"
             android:exported="false" />

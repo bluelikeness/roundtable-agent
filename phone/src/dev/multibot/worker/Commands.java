@@ -62,9 +62,11 @@ final class Commands {
     }
 
     JSONObject run(String cmd, JSONObject a) throws Exception {
-        if (!cmd.equals("state") && !cmd.equals("watch") && !cmd.equals("update_check") && !cmd.equals("logs") && !cmd.equals("app_info")) keepAwake();
+        if (!cmd.equals("state") && !cmd.equals("watch") && !cmd.equals("update_check") && !cmd.equals("logs") && !cmd.equals("app_info")
+                && !cmd.equals("wake") && !cmd.equals("global")) keepAwake();
         switch (cmd) {
             case "state": return state();
+            case "wake": return wake();
             case "watch": return watch(a);
             case "launch": return launch(a.getString("pkg"));
             case "tree": return tree();
@@ -91,6 +93,8 @@ final class Commands {
         JSONObject o = new JSONObject();
         o.put("screen_on", pm.isInteractive());
         o.put("locked", km.isKeyguardLocked());
+        // 보안 잠금(PIN·패턴·지문)이 있는지. 없으면 서버가 wake 로 화면을 켜고 잠금화면을 넘길 수 있다
+        o.put("secure", km.isDeviceSecure());
         o.put("foreground", foreground());
         o.put("battery", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
         o.put("version", Updater.currentName(svc) + "(" + Updater.currentVersion(svc) + ")");
@@ -288,10 +292,16 @@ final class Commands {
     private List<AccessibilityNodeInfo> appNodes() {
         List<AccessibilityNodeInfo> out = new ArrayList<>();
         ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<>();
+        // 루트는 한 번만 받는다: 창이 바뀌는 중(깨운 직후 등)에는 두 번째 호출이 null 일 수 있다(ArrayDeque 는 null 을 못 받음)
         for (AccessibilityWindowInfo w : svc.getWindows()) {
-            if (w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION && w.getRoot() != null) q.add(w.getRoot());
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root != null) q.add(root);
         }
-        if (q.isEmpty() && svc.getRootInActiveWindow() != null) q.add(svc.getRootInActiveWindow());
+        if (q.isEmpty()) {
+            AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+            if (root != null) q.add(root);
+        }
         while (!q.isEmpty() && out.size() < MAX_NODES) {
             AccessibilityNodeInfo n = q.poll();
             if (Build.VERSION.SDK_INT < 30) {
@@ -394,11 +404,71 @@ final class Commands {
         }
     }
 
+    /**
+     * 화면을 켜고(보안 잠금이 없으면) 잠금화면을 넘긴다. 보안 잠금이 있으면 아무것도 하지 않는다(풀 수도 없고, 주머니
+     * 속에서 화면만 켜 봐야 소용없다). 결과는 state 와 같은 screen_on·locked·secure.
+     */
+    @SuppressWarnings("deprecation")
+    private JSONObject wake() throws Exception {
+        PowerManager pm = (PowerManager) svc.getSystemService(Context.POWER_SERVICE);
+        KeyguardManager km = (KeyguardManager) svc.getSystemService(Context.KEYGUARD_SERVICE);
+        boolean secure = km.isDeviceSecure();
+        boolean woke = false;
+        if (!secure && (!pm.isInteractive() || km.isKeyguardLocked())) {
+            boolean wasOn = pm.isInteractive();
+            woke = true;
+            // 화면 켜기: ACQUIRE_CAUSES_WAKEUP 잠금(옛 방식, 대부분의 기기) + 잠금화면 위 투명 화면(새 방식)
+            PowerManager.WakeLock w = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "multibot:wake");
+            w.acquire(3000);
+            svc.runOnMain(() -> {
+                try { WakeActivity.start(svc); } catch (Exception e) { WLog.add("깨우기 화면 실패: " + e.getClass().getSimpleName()); }
+            });
+            long end = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < end && (!pm.isInteractive() || km.isKeyguardLocked())) Thread.sleep(150);
+            if (pm.isInteractive() && km.isKeyguardLocked()) {
+                // 넘기기 요청이 안 먹는 잠금화면: 위로 밀기(보안 잠금이 없을 때만 여기 온다)
+                swipeUp();
+                end = System.currentTimeMillis() + 1500;
+                while (System.currentTimeMillis() < end && km.isKeyguardLocked()) Thread.sleep(150);
+            }
+            WLog.add("깨우기: " + (wasOn ? "켜져 있음" : "화면 켬") + (km.isKeyguardLocked() ? ", 잠금화면 남음" : ""));
+        }
+        if (pm.isInteractive() && !km.isKeyguardLocked()) keepAwake();
+        JSONObject o = new JSONObject();
+        o.put("screen_on", pm.isInteractive());
+        o.put("locked", km.isKeyguardLocked());
+        o.put("secure", secure);
+        o.put("woke", woke);  // 꺼져 있거나 잠금화면이던 것을 이번에 켰다(서버가 다 쓴 뒤 다시 끌지 정한다)
+        return o;
+    }
+
+    private void swipeUp() throws Exception {
+        int w = svc.getResources().getDisplayMetrics().widthPixels;
+        int h = svc.getResources().getDisplayMetrics().heightPixels;
+        Path p = new Path();
+        p.moveTo(w / 2f, h * 0.85f);
+        p.lineTo(w / 2f, h * 0.25f);
+        GestureDescription g = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, 300)).build();
+        CountDownLatch done = new CountDownLatch(1);
+        svc.dispatchGesture(g, new AccessibilityService.GestureResultCallback() {
+            @Override public void onCompleted(GestureDescription d) { done.countDown(); }
+            @Override public void onCancelled(GestureDescription d) { done.countDown(); }
+        }, null);
+        done.await(2, TimeUnit.SECONDS);
+    }
+
     private JSONObject global(String action) {
         int a;
         switch (action) {
             case "home": a = AccessibilityService.GLOBAL_ACTION_HOME; break;
             case "back": a = AccessibilityService.GLOBAL_ACTION_BACK; break;
+            case "lock_screen":
+                // 다 쓴 뒤 화면 끄기(서버 설정). 잠금 설정이 없으면 화면만 꺼진다
+                if (Build.VERSION.SDK_INT < 28) throw new IllegalStateException("안드로이드 9 이상에서만 화면 끄기 가능");
+                a = AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN;
+                break;
             default: throw new IllegalArgumentException("모르는 동작 " + action);
         }
         if (!svc.performGlobalAction(a)) throw new IllegalStateException("동작 실패 " + action);
