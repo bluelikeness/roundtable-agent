@@ -8,7 +8,8 @@ description: |
 timeouts: {default_s: 180, send_s: 60, quiet_s: 4}
 queue: {max_depth: 5, max_wait_s: 60}
 min_interval_s: 3
-progress_patterns: []
+# 답 대신 먼저 뜨는 진행 표시 말풍선(2026-11-12 실기기: "처리 중"을 답으로 받음)
+progress_patterns: ['^\s*(처리\s?중|Processing|Thinking)[.…]*\s*$']
 question_patterns: ['\?$']
 health: {probe_interval_s: 300}
 hub_webhook: http://hub-api:8000/internal/bot-status

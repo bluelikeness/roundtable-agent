@@ -23,6 +23,9 @@ selectors.yaml 키 (input·input_u2·send 는 셀렉터 하나 또는 후보 목
                 탭해야 글 입력 모드가 되는 앱(Cue)은 그 입력줄 버튼도 여기 둔다
   exclude_text_re   봇 답에서 뺄 글(시각·"복사" 같은 UI 글자)
   exclude_button_re 버튼에서 뺄 라벨
+  exclude_inside_desc_re  content-desc 가 이것과 맞는 노드(3단계 위 조상까지) 안의 글은 답이 아니다. 대화 목록 위에
+                겹쳐 그려지는 머리 부분(피클: "… 프로필" 아래 이름, "친구 초대" 안의 "초대")은 내 말풍선이 화면
+                위로 밀려 잘리면 "내 말 아래 새 글"로 잡힌다(2026-11-12 실기기)
   confirm_button_re 결제·예약 확정 버튼 → confirmation_required
   login_markers     로그인 화면에만 있는 글자
   text_from_desc    true 면 글을 content-desc 에서도 읽는다(Flutter 앱: Cue. 말풍선 글이 text 가 아니라 desc 에 있다)
@@ -153,6 +156,7 @@ class PhoneChatAdapter(AndroidAdapter):
         s = self.sel
         self._exclude_text = re.compile(s["exclude_text_re"]) if s.get("exclude_text_re") else None
         self._exclude_btn = re.compile(s["exclude_button_re"]) if s.get("exclude_button_re") else None
+        self._exclude_inside = re.compile(s["exclude_inside_desc_re"]) if s.get("exclude_inside_desc_re") else None
         self._confirm_re = re.compile(s["confirm_button_re"]) if s.get("confirm_button_re") else None
         self._baseline: set[str] = set()
         self._sent_norm: str | None = None
@@ -649,10 +653,22 @@ class PhoneChatAdapter(AndroidAdapter):
                 continue
             if self._exclude_text is not None and self._exclude_text.search(sig):
                 continue
-            if self._is_button_text(n):
+            if self._is_button_text(n) or self._is_inside_excluded(n):
                 continue
             out.append(n)
         return out
+
+    def _is_inside_excluded(self, n: UiNode) -> bool:
+        if self._exclude_inside is None:
+            return False
+        p = n.parent
+        for _ in range(3):
+            if p is None:
+                break
+            if p.desc and self._exclude_inside.search(p.desc.strip()):
+                return True
+            p = p.parent
+        return False
 
     @staticmethod
     def _is_button_text(n: UiNode) -> bool:
