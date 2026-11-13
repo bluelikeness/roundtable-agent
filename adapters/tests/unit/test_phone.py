@@ -463,3 +463,44 @@ async def test_secure_lock_is_never_woken(vooy_phone):
     res = await a.ask("안녕", "t1", timeout_s=20)
     assert not res.ok and res.error == "unavailable"
     assert phone.screen is False
+
+
+def _bot_adapter(bot: str, tmp_path) -> PhoneChatAdapter:
+    d = __import__(f"adapters.{bot}", fromlist=["x"]).__path__[0]
+    return PhoneChatAdapter(AdapterConfig.load(d + "/config.yaml"), tmp_path / f"state-{bot}", selectors_path=d + "/selectors.yaml")
+
+
+def test_pickle_header_overlay_is_not_reply(tmp_path):
+    """내 말풍선이 화면 위로 밀려 잘리면 목록 위에 겹친 머리 부분(프로필 이름·초대)이 답 앞에 섞였다(2026-11-12 실기기)."""
+    from adapters.android_base import parse_hierarchy
+
+    def tv(b: str, t: str) -> str:
+        return f'<node class="android.widget.TextView" package="com.pickle.client" text="{t}" content-desc="" clickable="false" bounds="{b}"/>'
+
+    xml = (
+        '<hierarchy><node class="android.view.View" package="com.pickle.client" text="" content-desc="" clickable="false" bounds="[0,0][1080,2200]">'
+        + tv("[98,0][936,85]", "내 질문")  # 위로 잘린 내 말풍선
+        + tv("[98,101][936,351]", "봇 답 첫 줄")
+        + tv("[98,367][936,617]", "봇 답 둘째 줄")
+        + '<node class="android.widget.EditText" package="com.pickle.client" text="" content-desc="" clickable="true" bounds="[163,1813][797,1939]"/>'
+        + '<node class="android.view.View" package="com.pickle.client" text="" content-desc="친구 초대" clickable="true" bounds="[892,82][1038,192]">'
+        + tv("[929,113][1001,161]", "초대") + "</node>"
+        + '<node class="android.view.View" package="com.pickle.client" text="" content-desc="봇이름 프로필" clickable="true" bounds="[469,0][611,292]">'
+        + '<node class="android.view.View" package="com.pickle.client" text="" content-desc="" clickable="false" bounds="[469,200][611,292]">'
+        + tv("[504,223][576,271]", "봇이름") + "</node></node>"
+        + "</node></hierarchy>"
+    )
+    a = _bot_adapter("pickle", tmp_path)
+    a._sent_norm = "내 질문"
+    got = [n.text for n in a._new_texts(parse_hierarchy(xml))]
+    assert got == ["봇 답 첫 줄", "봇 답 둘째 줄"]
+
+
+def test_muse_processing_bubble_is_progress(tmp_path):
+    """뮤즈가 답 대신 먼저 띄우는 "처리 중"을 답으로 받았다(2026-11-12 실기기)."""
+    from adapters.base import RawMessage
+
+    a = _bot_adapter("muse", tmp_path)
+    assert a._is_progress(RawMessage(id="1", text="처리 중"))
+    assert a._is_progress(RawMessage(id="2", text="처리 중..."))
+    assert not a._is_progress(RawMessage(id="3", text="요청을 처리 중에 생긴 문제를 정리하면 이렇다"))
