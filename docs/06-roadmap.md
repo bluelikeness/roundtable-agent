@@ -27,6 +27,8 @@ P2 이후는 독립적이라 병렬로 가도 된다. 단, 클로드 코드 세�
 | --- | --- |
 | 폰 게이트웨이(`adapters/phone/`), Vooy 어댑터 휴대폰 흐름, 피클·뮤즈 어댑터(`adapters/phonechat.py`), 워커 앱(`phone/`), 운영 compose·nginx `/phone/ws`, 공개 주소(Cloudflare 터널) | 개인 휴대폰에 워커 앱을 설치하면 "연결됨"이 뜨고, 허브 웹에서 `@부이`·`@피클`·`@뮤즈` 질문에 각 봇의 답이 온다 |
 
+> 2026-11-12 1단계 완료: 기준 통과, Cue·회의 모드까지. 확인 근거·운영 메모·남은 문제는 docs/proposals/phone-worker.md 11장.
+
 **P1 내부 순서** (한 세션이 한 줄을 맡는다)
 
 1. 레포 스캐폴드 + compose + DB 스키마(Alembic) + 허브 API 로그인·세션·메시지 REST

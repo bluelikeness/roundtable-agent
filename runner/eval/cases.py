@@ -1,4 +1,4 @@
-"""T1~T14 (docs/04-orchestrator.md 10장). 입력·Mock 배치·판정.
+"""T1~T15 (docs/04-orchestrator.md 10장). 입력·Mock 배치·판정.
 
 판정은 스트림에서 기계적으로 본다. 한 케이스의 모든 검사가 통과해야 그 실행이 통과다.
 정리 형식: 결론 줄(첫 줄이 표·제목이 아님), 줄 수 상한(단일 5줄, 그 외 15줄 — 04 7장).
@@ -122,9 +122,20 @@ def _debate(t: Trace, c: Checks, max_asks: int) -> None:
     c.add(f"ask ≤ {max_asks}", len(t.asks()) <= max_asks)
 
 
+def _answers_other(t: Trace, bot: str, other: str) -> bool:
+    """bot 의 어떤 ask 가 other 의 답이 온 뒤에 나갔고, other 의 이름을 담았나(상대 발언을 받아 답하게 했나)."""
+    return any(
+        other in x.text and any(t.sequential(o, x) for o in t.asks(other)) for x in t.asks(bot)
+    )
+
+
 def t5(ts: list[Trace], c: Checks) -> None:
     t = _last(ts)
     _debate(t, c, 6)
+    c.add(
+        "상대 발언을 받아 답하게 함(a 답 뒤 b 에, 또는 b 답 뒤 a 에)",
+        _answers_other(t, "mock-b", "mock-a") or _answers_other(t, "mock-a", "mock-b"),
+    )
     c.add("입장 표", t.has_table())
 
 
@@ -204,6 +215,20 @@ def t14(ts: list[Trace], c: Checks) -> None:
     c.add("'진행할까요?'", "진행할까요" in t.final)
 
 
+def t15(ts: list[Trace], c: Checks) -> None:
+    """회의: 봇 지명 없이 "회의해" → 가용 봇 전부 1라운드, 2라운드부터 서로의 주장을 전한다."""
+    t = _last(ts)
+    for bot in STD:
+        c.add(f"{bot} 참가(ask)", t.asks(bot))
+    others = {b: [o for o in STD if o != b] for b in STD}
+    relayed = [
+        b for b in ("mock-a", "mock-b") if any(any(o in x.text for o in others[b]) for x in t.asks(b)[1:])
+    ]
+    c.add("2라운드 입력에 다른 봇 이름·주장(mock-a 또는 mock-b)", relayed)
+    c.add("ask ≤ 9", len(t.asks()) <= 9)
+    c.add("봇×쟁점 표", t.has_table())
+
+
 def t14_session() -> dict[str, Any]:
     """25시간 전 마지막 메시지 → 러너가 새 Claude 세션 + <session_summary> 주입(04 9장).
 
@@ -231,6 +256,7 @@ CASES: list[Case] = [
     Case("T11", "봇 실패", [FANOUT_TEXT], t11, bots={**STD, "mock-a": "a-fail"}),
     Case("T12", "지명 제외", ["mock-a 말고 다른 봇들한테 강남 한식 내일 7시 2명 찾아줘"], t12),
     Case("T13", "토론 상한", ["mock-a랑 mock-b 서로 비판하게 해서 부산 1박 여행 계획 합의 보게 해. 10라운드 해"], t13, runner="runner-r5"),
+    Case("T15", "회의(지명 없음)", ["회의해서 부산 1박 여행 계획에 대해 의견 모아줘. 서로 의견 주고받게 해"], t15),
     Case("T14", "분할 후 이어받기", ["아까 그 식당 예약해"], t14, bots={**STD, "mock-a": "a-confirm"}, single=True),
 ]
 CASES_BY_ID = {c.id: c for c in CASES}
