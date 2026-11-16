@@ -122,9 +122,20 @@ def _debate(t: Trace, c: Checks, max_asks: int) -> None:
     c.add(f"ask ≤ {max_asks}", len(t.asks()) <= max_asks)
 
 
+def _answers_other(t: Trace, bot: str, other: str) -> bool:
+    """bot 의 어떤 ask 가 other 의 답이 온 뒤에 나갔고, other 의 이름을 담았나(상대 발언을 받아 답하게 했나)."""
+    return any(
+        other in x.text and any(t.sequential(o, x) for o in t.asks(other)) for x in t.asks(bot)
+    )
+
+
 def t5(ts: list[Trace], c: Checks) -> None:
     t = _last(ts)
     _debate(t, c, 6)
+    c.add(
+        "상대 발언을 받아 답하게 함(a 답 뒤 b 에, 또는 b 답 뒤 a 에)",
+        _answers_other(t, "mock-b", "mock-a") or _answers_other(t, "mock-a", "mock-b"),
+    )
     c.add("입장 표", t.has_table())
 
 
