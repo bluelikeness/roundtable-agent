@@ -1,0 +1,7 @@
+# 허브 공개 입구: 고정 주소(DDNS 등)로 들어온 HTTPS 를 web(nginx)로 넘긴다.
+# 인증서는 Caddy 가 Let's Encrypt 에서 자동으로 받는다(TLS-ALPN, 바깥 443 → 이 컨테이너 443 만 열면 된다).
+# 주소는 레포에 넣지 않고 .env 의 PUBLIC_HOST 에서 읽는다.
+{$PUBLIC_HOST} {
+	encode gzip
+	reverse_proxy web:80
+}

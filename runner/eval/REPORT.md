@@ -1,7 +1,7 @@
 # P1-4 오케스트레이터 평가 결과
 
 - 실행: 2026-11-08, `make eval` (T1~T14 각 5회, 동시 4개, 소요 6.8분)
-- 러너: Claude Code 2.1.310 고정, 모델 sonnet, `--max-turns 12`(바꾸지 않음), `--tools ""`, hook 끔
+- 러너: Claude Code 2.1.310 고정, 모델 sonnet, `--max-turns 12`(이 보고서 당시. 2026-11-16 부터 턴 상한 없음), `--tools ""`, hook 끔
 - 봇: 평가 전용 Mock(`runner/eval/mocks/*.yaml`)
 - 생성 리포트 전문(실행별 툴 호출 순서 포함): [reports/20261108-122501.md](reports/20261108-122501.md)
 

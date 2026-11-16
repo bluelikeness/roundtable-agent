@@ -40,13 +40,13 @@ async def test_first_run_args_and_events(settings, claude_log, monkeypatch):
     assert call["stdin"] == "--help 같은 메시지"  # 프롬프트는 stdin
     for flag, value in [
         ("--output-format", "stream-json"),
-        ("--max-turns", "12"),
         ("--model", "sonnet"),
         ("--disallowedTools", "Bash,Read,Write,Edit,WebSearch,WebFetch"),
         ("--allowedTools", "mcp__mock-a__ask,mcp__mock-a__status,mcp__mock-b__ask,mcp__mock-b__status"),
     ]:
         assert argv[argv.index(flag) + 1] == value
     assert "--verbose" in argv and "--strict-mcp-config" in argv
+    assert "--max-turns" not in argv  # 턴 상한 없음이 기본
     assert argv[argv.index("--tools") + 1] == ""  # 내장 툴 없음
     assert json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True}
     assert call["tool_search"] == "false"

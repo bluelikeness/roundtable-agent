@@ -119,9 +119,10 @@ class ClaudeCodeRunner(Runner):
             "--settings", HOOKLESS_SETTINGS,
             # --tools 로 이미 빠지지만 설계(02 4장)의 명시적 차단 목록도 그대로 둔다
             "--disallowedTools", s.disallowed_tools,
-            "--max-turns", str(s.max_turns),
             "--model", session.model,
         ]
+        if s.max_turns > 0:
+            args += ["--max-turns", str(s.max_turns)]
         tools = allowed_tools(session.bots)
         if tools:
             args += ["--allowedTools", ",".join(tools)]
@@ -141,7 +142,6 @@ class ClaudeCodeRunner(Runner):
             "bot_aliases": ", ".join(b.name for b in session.bots) or "(없음)",
             "debate_max_rounds": s.debate_max_rounds,
             "auto_confirm_limit": s.auto_confirm_limit,
-            "max_turns": s.max_turns,
         }
         (run_dir / "orchestrator.md").write_text(render_prompt(template, values), encoding="utf-8")
         return run_dir
