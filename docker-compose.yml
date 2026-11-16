@@ -40,6 +40,8 @@ services:
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?.env 에 HUB_SECRET_KEY 가 필요합니다}
       HUB_COOKIE_SECURE: ${HUB_COOKIE_SECURE:-true}
       HUB_RUNNER_URL: http://runner:8700
+      # 바깥 입구 POST /api/inbox 토큰(비면 닫힘). 피클 등이 방에 의견을 넣을 때 쓴다
+      HUB_INBOX_TOKEN: ${HUB_INBOX_TOKEN:-}
     secrets:
       - hub_adapter_token
     depends_on:

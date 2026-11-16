@@ -10,6 +10,7 @@ from app.bots_api import internal as internal_router
 from app.bots_api import router as bots_router
 from app.config import get_settings
 from app.db import dispose_engine, get_sessionmaker
+from app.inbox import router as inbox_router
 from app.runner_client import RemoteRunner
 from app.runs import RunManager
 from app.ws import router as ws_router
@@ -43,6 +44,7 @@ app.include_router(router)
 app.include_router(ws_router)
 app.include_router(bots_router)
 app.include_router(internal_router)
+app.include_router(inbox_router)
 
 
 @app.get("/healthz")
