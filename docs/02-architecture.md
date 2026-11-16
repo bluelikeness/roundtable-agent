@@ -44,7 +44,7 @@
 **릴레이와 토론은 4–8만 다르다**
 
 1. 릴레이: `mcp__vooy__ask` → 결과 받음 → 그 결과를 포함한 질문으로 `mcp__muse__ask` → 결과 → 정리. 툴 호출이 순차로 바뀔 뿐 이벤트 형태는 같다.
-2. 토론: 릴레이를 라운드 상한(기본 3)까지 반복. 종료 판단은 시스템 프롬프트의 규칙과 `--max-turns`로 이중 제한.
+2. 토론: 릴레이를 라운드 상한(기본 3)까지 반복. 종료 판단은 시스템 프롬프트의 규칙(라운드 상한·시간 어림)과 전체 타임아웃으로 제한한다(턴 상한은 두지 않음, 04 참고).
 3. 봇이 되물으면: 어댑터가 `needs_input: true`로 반환 → Claude Code가 세션 맥락으로 답할 수 있으면 다시 `ask`, 없으면 사용자에게 되묻고 실행 종료. 다음 메시지가 `--resume`으로 이어받는다.
 4. 봇 장애: 어댑터가 `error: unavailable`을 반환 → Claude Code는 그 봇을 빼고 정리하며 이유를 밝힌다. 허브는 동시에 헬스체크 상태를 갱신한다.
 
@@ -60,7 +60,6 @@ claude -p "<사용자 메시지>" \
   --mcp-config ./mcp.json --strict-mcp-config \
   --allowedTools "mcp__vooy__ask,mcp__vooy__status,mcp__muse__ask,mcp__muse__status,..." \  # 가용 봇별로 러너가 생성
   --disallowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
-  --max-turns 12 \
   --model sonnet
 ```
 
@@ -70,7 +69,7 @@ claude -p "<사용자 메시지>" \
 | 세션 수명 | 허브 세션 삭제 시 함께 폐기. 메시지 간 24시간 넘으면 새 세션 + 요약 주입 | Claude Code 세션 파일이 무한히 커지는 것 방지 |
 | 시스템 프롬프트 | `--append-system-prompt-file`로 오케스트레이터 규칙 주입 (별도 문서) | Claude Code 기본 프롬프트는 코딩용이라 역할 재정의 필요 |
 | 툴 제한 | `--strict-mcp-config` + `--allowedTools` 화이트리스트(`mcp.json`에 넣은 봇마다 `mcp__<bot>__ask`·`mcp__<bot>__status` 두 개, 러너가 `mcp.json`과 함께 생성), 파일·셸·웹 툴은 명시적 차단 | 오케스트레이터가 서버 파일을 건드리면 안 됨. 권한 프롬프트가 헤드리스에서 멈추는 것 방지 |
-| 턴 상한 | `--max-turns 12` (팬아웃 3봇 + 릴레이 2회 + 되물음 여유) | 토론 모드 폭주 시 구독 한도 보호 |
+| 턴 상한 | 두지 않음(2026-11-16 개정, 처음엔 `--max-turns 12`). `RUNNER_MAX_TURNS`>0 이면 다시 켜진다 | 12는 정당한 게임·토론(4봇×4바퀴)을 정리 없이 끊었다. 긴 맥락은 Claude Code 자동 압축, 폭주는 재시도 금지·어댑터 cooldown·600초 타임아웃이 막는다 |
 | 모델 | 기본 `sonnet`, 토론·복잡 비교만 `opus` 선택 가능 | 오케스트레이션은 판단 위주라 Sonnet으로 충분. 비용은 구독 한도 |
 | 작업 디렉터리 | 빈 전용 디렉터리, `CLAUDE.md` 없음 | 프로젝트 지시가 섞이지 않게 |
 | 타임아웃 | 프로세스 전체 600초. 초과 시 SIGTERM 후 UI에 부분 결과 + 실패 표시 | `ask` 한 번은 재시도 포함 `timeout_s`(기본 120) 안에 끝난다. 릴레이 2단·팬아웃은 여유 있게, 토론 6회는 봇 평균 응답 60초 기준으로 들어가는 값 |

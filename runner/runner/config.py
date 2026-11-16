@@ -20,7 +20,9 @@ class RunnerSettings(BaseSettings):
     runs_dir: Path = Path("/tmp/multibot-runs")
     # 오케스트레이터 시스템 프롬프트 템플릿(docs/04-orchestrator.md 8장)
     prompt_file: Path = PKG_DIR.parent / "orchestrator.md"
-    max_turns: int = 12
+    # Claude Code --max-turns. 0 이면 넘기지 않는다(상한 없음, 2026-11-16 결정: 턴 수로 끊지 않고
+    # 600초 실행 상한·지침의 종료 판단에 맡긴다. 길어진 맥락은 Claude Code 자동 압축이 처리한다)
+    max_turns: int = 0
     # 프로세스 전체 상한(02 4장). 넘으면 SIGTERM
     timeout_s: float = 600
     # MCP 툴 호출 하나의 상한(mcp.json 서버별 timeout). Claude Code 기본 60초를 덮는다
