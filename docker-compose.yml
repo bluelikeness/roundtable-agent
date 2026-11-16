@@ -78,6 +78,22 @@ services:
       - phone-gateway
     restart: unless-stopped
 
+  # 공개 입구(선택): 고정 주소의 HTTPS 를 web 으로. .env 에 PUBLIC_HOST 와 COMPOSE_PROFILES=public 을 두면 켜진다.
+  # 공유기에서 바깥 TCP 443 을 이 PC 로 넘겨야 한다. 인증서는 edge-data 볼륨에 남는다.
+  edge:
+    image: caddy:2.8.4
+    profiles: [public]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
+    ports:
+      - "443:443"
+    volumes:
+      - ./edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge-data:/data
+    depends_on:
+      - web
+    restart: unless-stopped
+
   # 허브·러너를 실제 봇 없이 검증하는 가짜 봇 3개. MCP 9000, 관리 HTTP 9100 (내부망)
   mock-a:
     <<: *mock-adapter
@@ -200,3 +216,4 @@ volumes:
   pickle-data:
   muse-data:
   cue-data:
+  edge-data:
