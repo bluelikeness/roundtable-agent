@@ -169,6 +169,15 @@ export function addOptimisticUser(state: ChatState, text: string, ts: string): C
   return { ...state, items: [...state.items, item], localCounter: n };
 }
 
+/**
+ * message.ack 인데 확정할 낙관적 말풍선이 없으면 이 화면이 보낸 말이 아니다(바깥 입구·다른 기기).
+ * ack 에는 글이 없으므로 REST 로 그 메시지를 읽어 와야 사용자 말풍선이 보인다.
+ */
+export function ackNeedsFetch(state: ChatState, ev: HubEvent): boolean {
+  if (ev.type !== "message.ack" || ev.seq == null || hasSeq(state, ev.seq)) return false;
+  return !state.items.some((i) => i.kind === "user" && i.optimistic);
+}
+
 // --- 이벤트 ---
 
 function progressOf(runs: RunsState, runId: string): RunProgress {

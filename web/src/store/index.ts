@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { api, HttpError } from "../api/rest";
 import type { BotInfo, BotStatusPayload, ClaudeStatus, HubEvent, SessionOut } from "../api/types";
 import { HubSocket, type WsStatus } from "../api/ws";
-import { addOptimisticUser, applyEvent, emptyChat, loadMessages, type ChatState } from "./chat";
+import { ackNeedsFetch, addOptimisticUser, applyEvent, emptyChat, loadMessages, type ChatState } from "./chat";
 
 export type Model = "sonnet" | "opus";
 export type AuthState = "unknown" | "anon" | "authed";
@@ -128,8 +128,10 @@ function handleEvent(ev: HubEvent) {
   }
   const sid = ev.session_id;
   if (!sid) return;
+  const needFetch = ackNeedsFetch(get().chats[sid] ?? emptyChat(), ev);
   updateChat(sid, (c) => applyEvent(c, ev));
   if (ev.type === "message.ack") touchSession(sid, ev.ts);
+  if (needFetch && get().activeId === sid) void fetchNewMessages(sid);
   if (ev.type === "run.finished") void loadClaudeStatus();
 }
 
@@ -140,6 +142,16 @@ function touchSession(sid: string, ts: string) {
     const rest = s.sessions.filter((x) => x.id !== sid);
     return { sessions: [{ ...cur, last_message_at: ts }, ...rest] };
   });
+}
+
+/** 바깥에서 들어온 사용자 메시지처럼 이벤트에 글이 없는 메시지를 REST 로 채운다 */
+async function fetchNewMessages(sid: string) {
+  try {
+    const msgs = await api.listMessages(sid, (get().chats[sid] ?? emptyChat()).lastMessageSeq);
+    updateChat(sid, (c) => loadMessages(c, msgs));
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
 }
 
 /** 활성 세션을 REST 로 채우고 놓친 이벤트를 구독으로 받는다 */
