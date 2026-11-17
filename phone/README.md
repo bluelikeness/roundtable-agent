@@ -17,8 +17,10 @@ PHONE_WS_URL=wss://hub.example/phone/ws PHONE_DEVICE_TOKEN=<.env 의 값> phone/
 ## 배포와 자동 업데이트
 
 ```bash
-PHONE_PUBLIC_URL=https://<허브 공개 주소> phone/release.sh
+phone/release.sh   # .env 의 PUBLIC_HOST(각자의 도메인)로 https://<PUBLIC_HOST> 를 쓴다
 ```
+
+다른 주소로 배포할 때만 `PHONE_PUBLIC_URL=https://<주소> phone/release.sh`처럼 덮어쓴다.
 
 - 빌드(버전 번호는 2026-01-01부터 초 단위) → `phone/dist/`에 게시. `phone-gateway`가 이 폴더를 읽어 워커 자동 업데이트에 쓴다.
 - 30분 동안 한 번만 쓰는 설치 링크와 QR(`phone/dist/qr.png`)을 만든다. APK 안에 기기 토큰이 있어 공개 링크는 두지 않는다.

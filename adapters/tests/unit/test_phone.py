@@ -504,3 +504,60 @@ def test_muse_processing_bubble_is_progress(tmp_path):
     assert a._is_progress(RawMessage(id="1", text="처리 중"))
     assert a._is_progress(RawMessage(id="2", text="처리 중..."))
     assert not a._is_progress(RawMessage(id="3", text="요청을 처리 중에 생긴 문제를 정리하면 이렇다"))
+
+
+def _pickle_row_xml(with_input: bool = True) -> str:
+    def node(cls: str, b: str, desc: str = "", click: str = "true") -> str:
+        return f'<node class="{cls}" package="com.pickle.client" text="" content-desc="{desc}" clickable="{click}" bounds="{b}"/>'
+
+    return (
+        '<hierarchy><node class="android.view.View" package="com.pickle.client" text="" content-desc="" clickable="false" bounds="[0,0][1440,3120]">'
+        + (node("android.widget.EditText", "[60,2663][1180,2843]") if with_input else "")
+        + node("android.view.View", "[1200,2663][1380,2843]")  # 입력줄 오른쪽 버튼
+        + node("android.view.View", "[1000,2862][1353,3064]")  # 입력창 바로 아래 하단 탭
+        + "</node></hierarchy>"
+    )
+
+
+def test_bottom_tab_below_input_is_not_send_candidate(tmp_path):
+    """2026-11-16 실기기: 입력창 바로 아래 하단 탭을 '나타난 전송 버튼'으로 눌러 계정 화면을 답으로 읽었다."""
+    from adapters.android_base import Bounds, parse_hierarchy
+
+    a = _bot_adapter("pickle", tmp_path)
+    a._pre_field = Bounds(60, 2663, 1180, 2843)
+    row = a._row_buttons(parse_hierarchy(_pickle_row_xml()))
+    assert [n.bounds.as_tuple() for n in row] == [(1200, 2663, 1380, 2843)]
+
+
+async def test_guessed_send_that_leaves_chat_is_failure(tmp_path, monkeypatch):
+    """추측으로 고른 버튼을 누른 뒤 입력창도 내 말풍선도 없으면 성공이 아니라 실패(바뀐 화면을 답으로 읽지 않는다)."""
+    from adapters.android_base import parse_hierarchy
+    from adapters.base import BackendDown
+
+    a = _bot_adapter("pickle", tmp_path)
+    a.SEND_SETTLE_S = a.SEND_CHECK_S = a.SEND_FIRST_CHECK_S = 0.01
+    a.SEND_CONFIRM_S = 0.1
+    chat = parse_hierarchy(_pickle_row_xml())
+    away = parse_hierarchy(_pickle_row_xml(with_input=False))
+    screens = [chat]
+    pressed = []
+
+    async def tree():
+        return screens[-1]
+
+    async def find_send(root, for_press):
+        n = next(n for n in root.walk() if n.bounds.as_tuple() == (1000, 2862, 1353, 3064))
+        return n, "appeared"
+
+    async def press(node, source):
+        pressed.append(source)
+        screens.append(away)  # 누르자 다른 화면으로 갔다
+
+    monkeypatch.setattr(a, "tree", tree)
+    monkeypatch.setattr(a, "_find_send", find_send)
+    monkeypatch.setattr(a, "_press", press)
+    with pytest.raises(BackendDown, match="채팅 화면이 아님"):
+        await a._tap_send("안녕")
+    assert pressed == ["appeared"]
+    assert a._confirm_root is None
+    assert a.learned.get(a._app_key, "send") is None

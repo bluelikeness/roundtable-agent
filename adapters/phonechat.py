@@ -285,6 +285,12 @@ class PhoneChatAdapter(AndroidAdapter):
         body = text.strip()
         if body:
             field = find_first(root, self.sel["input"])
+            if field is None and self.phone_mode:
+                # 앱은 떠 있지만 다른 화면(지난번 헛누름으로 간 계정 화면 등). 채팅 탭·뒤로가기로 돌아간다
+                await self._ensure_ready()
+                root = await self.tree()
+                self._baseline = {self._sig(n) for n in self._texts(root)}
+                field = find_first(root, self.sel["input"])
             if field is None:
                 raise BackendDown("입력창 없음")
             if self.sel.get("focus_input"):
@@ -430,11 +436,17 @@ class PhoneChatAdapter(AndroidAdapter):
         return f"{n.cls}|{n.rid}|{n.desc}|{n.bounds.as_tuple()}"
 
     def _row_buttons(self, root: UiNode) -> list[UiNode]:
-        """입력줄(글 넣기 전 입력창 높이)의 오른쪽 절반에 있는 누를 수 있는 노드."""
-        f = self._pre_field
+        """입력줄(입력창과 같은 높이)의 오른쪽 절반에 있는 누를 수 있는 노드.
+
+        기준은 지금 화면의 입력창, 없으면(포커스를 받으면 사라지는 앱) 글 넣기 전 입력창. 버튼의 가운데가 입력창
+        높이 안에 있어야 한다. 가장자리로 재면 입력창 바로 아래 하단 탭이 끼어들어, 그 탭을 전송 버튼으로 눌러
+        다른 화면을 답으로 읽었다(2026-11-16 피클: 입력창 2663~2843 아래 탭 2862~3064).
+        """
+        now = find_first(root, self.sel["input"]) if self._pre_field is not None else None
+        f = now.bounds if now is not None and not now.bounds.empty else self._pre_field
         if f is None:
             return []
-        pad = max(40, (f.bottom - f.top) // 2)
+        pad = max(20, (f.bottom - f.top) // 4)
         cx = f.center[0]
         out = []
         for n in self._app_nodes(root):
@@ -444,7 +456,7 @@ class PhoneChatAdapter(AndroidAdapter):
             # 입력창을 감싼 틀은 버튼이 아니다. 긴 글로 입력창이 여러 줄이 되면 틀이 커져 위치가 바뀐다(노트9 Cue)
             if (b.right - b.left) * 2 > (f.right - f.left):
                 continue
-            if b.bottom <= f.top - pad or b.top >= f.bottom + pad or b.center[0] <= cx:
+            if not (f.top - pad <= b.center[1] <= f.bottom + pad) or b.center[0] <= cx:
                 continue
             out.append(n)
         return out
@@ -571,11 +583,19 @@ class PhoneChatAdapter(AndroidAdapter):
                 first = False
                 root = await self.tree()
                 self._confirm_root = root
-                if self._only_with_text(used) and await self._find_send(root, for_press=False) is None:
-                    return self._learn(used)  # 전송 버튼이 사라졌다 = 입력창이 비었다(접근성 트리의 입력창 글자는 늦게 지워진다: 뮤즈)
                 if mine(root) > before:
                     return self._learn(used)  # 내 말풍선이 생겼다
                 field = find_first(root, self.sel["input"])
+                guessed = used is not None and used[1] in ("appeared", "learned")
+                if guessed and field is None:
+                    # 추측으로 고른 버튼을 누른 뒤 입력창도 내 말풍선도 없다 = 채팅 화면을 떠났을 수 있다(하단 탭).
+                    # 여기서 성공으로 보면 바뀐 화면을 답으로 읽는다 → 확인 시간 동안 더 보고, 그래도면 실패
+                    if loop.time() >= until:
+                        self._confirm_root = None
+                        raise BackendDown("전송 버튼으로 고른 곳을 누른 뒤 채팅 화면이 아님(전송 안 됨)")
+                    continue
+                if self._only_with_text(used) and await self._find_send(root, for_press=False) is None:
+                    return self._learn(used)  # 전송 버튼이 사라졌다 = 입력창이 비었다(접근성 트리의 입력창 글자는 늦게 지워진다: 뮤즈)
                 # 빈 입력창은 안내 문구(hint)를 text 로 내보내는 앱도 있어 '보낸 글과 다름'으로 본다
                 if field is None or _norm(field.text) != want:
                     return self._learn(used)

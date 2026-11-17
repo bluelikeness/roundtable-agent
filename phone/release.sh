@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # 워커 앱 배포: 빌드 → phone/dist 게시(자동 업데이트용) → 일회용 다운로드 링크와 QR → 연결된 휴대폰에 업데이트 알림.
-#   PHONE_PUBLIC_URL=https://<허브 공개 주소> phone/release.sh
+#   phone/release.sh                                  (.env 의 PUBLIC_HOST 로 https://<PUBLIC_HOST> 를 쓴다)
+#   PHONE_PUBLIC_URL=https://<주소> phone/release.sh   (다른 주소로 줄 때만)
 # 기기 토큰(PHONE_DEVICE_TOKEN)·허브 토큰(HUB_ADAPTER_TOKEN)은 레포 루트 .env 에서 읽는다.
 # 결과: phone/dist/multibot-worker.apk, latest.json, qr.png (전부 레포에 넣지 않음)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PUB="${PHONE_PUBLIC_URL:?PHONE_PUBLIC_URL=https://<허브 공개 주소> 가 필요합니다}"
-PUB="${PUB%/}"
 GW="${PHONE_GATEWAY_LOCAL:-http://127.0.0.1:9200}"
-envval() { grep -E "^$1=" "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d '\r'; }
+envval() { grep -E "^$1=" "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d '\r' || true; }
+# 공개 주소는 각자의 도메인. 레포에는 넣지 않고 .env 의 PUBLIC_HOST 하나로 정한다
+PUBLIC_HOST="$(envval PUBLIC_HOST)"
+PUB="${PHONE_PUBLIC_URL:-${PUBLIC_HOST:+https://$PUBLIC_HOST}}"
+[ -n "$PUB" ] || { echo ".env 에 PUBLIC_HOST=<내 도메인> 을 넣거나 PHONE_PUBLIC_URL=https://<주소> 를 주세요" >&2; exit 1; }
+PUB="${PUB%/}"
 DEV_TOKEN="$(envval PHONE_DEVICE_TOKEN)"
 HUB_TOKEN="$(envval HUB_ADAPTER_TOKEN)"
 [ -n "$DEV_TOKEN" ] && [ -n "$HUB_TOKEN" ] || { echo ".env 에 PHONE_DEVICE_TOKEN·HUB_ADAPTER_TOKEN 이 필요합니다" >&2; exit 1; }
