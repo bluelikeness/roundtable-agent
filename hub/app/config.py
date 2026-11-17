@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     health_interval_s: float = 30
     # "오늘" 실행 횟수·토큰을 셀 때의 UTC 오프셋(시간). 봇 상태 패널 Claude Code 섹션. 기본 KST
     day_utc_offset_h: int = 9
+    # 바깥(피클 등 다른 AI 비서)이 방에 의견을 넣는 입구 POST /api/inbox 의 Bearer 토큰.
+    # 비어 있으면 입구를 닫는다(404). 32자 이상 무작위 값
+    inbox_token: str = ""
+    # 입구 남용 방지: 분당 받는 건수와 글 길이 상한
+    inbox_per_minute: int = 10
+    inbox_max_chars: int = 4000
 
     def read_adapter_token(self) -> str:
         if self.adapter_token:
