@@ -129,4 +129,4 @@ make types       # hub/app/events.py → web/src/types/events.ts 재생성
 
 ## 라이선스
 
-아직 정하지 않았습니다. 모든 권리는 작성자에게 있습니다.
+[MIT](LICENSE). 저장소 전체(안드로이드 워커 앱 `phone/` 포함)에 적용됩니다.
