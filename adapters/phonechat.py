@@ -436,11 +436,15 @@ class PhoneChatAdapter(AndroidAdapter):
         return f"{n.cls}|{n.rid}|{n.desc}|{n.bounds.as_tuple()}"
 
     def _row_buttons(self, root: UiNode) -> list[UiNode]:
-        """입력줄(입력창과 같은 높이)의 오른쪽 절반에 있는 누를 수 있는 노드.
+        """입력줄의 오른쪽 절반에 있는 누를 수 있는 노드.
 
-        기준은 지금 화면의 입력창, 없으면(포커스를 받으면 사라지는 앱) 글 넣기 전 입력창. 버튼의 가운데가 입력창
-        높이 안에 있어야 한다. 가장자리로 재면 입력창 바로 아래 하단 탭이 끼어들어, 그 탭을 전송 버튼으로 눌러
-        다른 화면을 답으로 읽었다(2026-11-16 피클: 입력창 2663~2843 아래 탭 2862~3064).
+        기준은 지금 화면의 입력창, 없으면(포커스를 받으면 사라지는 앱) 글 넣기 전 입력창.
+        1) 버튼의 가운데가 입력창 높이 안. 가장자리로 재면 입력창 바로 아래 하단 탭이 끼어들어, 그 탭을 전송
+           버튼으로 눌러 다른 화면을 답으로 읽었다(2026-11-16 피클: 입력창 2663~2843 아래 탭 2862~3064).
+        2) 1이 비면 입력창을 감싼 입력 상자 틀 안의 버튼 줄. 버튼 줄이 글 칸 아래에 붙은 앱(2026-11-17 울트라25
+           Cue: 틀 1378~1730 안에 글 칸 1404~1554, 버튼 줄 1565~1700). 틀은 글 칸 높이의 3배 이하만 본다.
+           글이 여러 줄이 되면 글 칸만 감싼 좁은 틀이 생기고(같은 날 울트라25 Cue: 글 칸 1314~1554 로 커짐) 글 칸이
+           바깥 틀 위로 넘치기도 해서, 가장 가까운 틀이 아니라 버튼 후보가 들어 있는 가장 가까운 틀을 쓴다.
         """
         now = find_first(root, self.sel["input"]) if self._pre_field is not None else None
         f = now.bounds if now is not None and not now.bounds.empty else self._pre_field
@@ -448,18 +452,37 @@ class PhoneChatAdapter(AndroidAdapter):
             return []
         pad = max(20, (f.bottom - f.top) // 4)
         cx = f.center[0]
-        out = []
-        for n in self._app_nodes(root):
-            b = n.bounds
-            if not n.clickable or b.empty or n.cls.endswith("EditText") or b.contains(f):
-                continue
+        nodes = [
+            n
+            for n in self._app_nodes(root)
+            if n.clickable
+            and not n.bounds.empty
+            and not n.cls.endswith("EditText")
+            and not n.bounds.contains(f)
             # 입력창을 감싼 틀은 버튼이 아니다. 긴 글로 입력창이 여러 줄이 되면 틀이 커져 위치가 바뀐다(노트9 Cue)
-            if (b.right - b.left) * 2 > (f.right - f.left):
-                continue
-            if not (f.top - pad <= b.center[1] <= f.bottom + pad) or b.center[0] <= cx:
-                continue
-            out.append(n)
-        return out
+            and (n.bounds.right - n.bounds.left) * 2 <= (f.right - f.left)
+            and n.bounds.center[0] > cx
+        ]
+        out = [n for n in nodes if f.top - pad <= n.bounds.center[1] <= f.bottom + pad]
+        if out:
+            return out
+        return self._input_box_buttons(now, f, nodes) if now is not None else []
+
+    @staticmethod
+    def _input_box_buttons(field: UiNode, f: Bounds, nodes: list[UiNode]) -> list[UiNode]:
+        """글 칸의 조상 틀 중 버튼 후보가 들어 있는 가장 가까운 틀(글 칸 높이의 3배 이하)의 후보. 없으면 []."""
+        h = f.bottom - f.top
+        p = field.parent
+        while p is not None:
+            b = p.bounds
+            if not b.empty:
+                if b.bottom - b.top > 3 * h:
+                    return []
+                inside = [n for n in nodes if b.contains(n.bounds)]
+                if inside:
+                    return inside
+            p = p.parent
+        return []
 
     async def _icons(self, nodes: list[UiNode]) -> list[tuple[UiNode, bytes]] | None:
         """휴대폰: 노드들의 버튼 그림. 스크린샷을 못 얻으면 None. 에뮬레이터는 쓰지 않는다(None)."""
@@ -571,6 +594,16 @@ class PhoneChatAdapter(AndroidAdapter):
                 # (뮤즈·Cue: 누르거나 길게 누르면 음성 모드) 절대 다시 누르지 않는다
                 return self._learn(used)
             elif not await self._tap_send_fallback():
+                f = find_first(root, self.sel["input"])
+                log.warning(
+                    "전송 버튼 못 찾음: 입력창 %s(글 %s자) 글 넣기 전 %s, 입력줄 후보 전 %s / 지금 %s, 그림 %s",
+                    f.bounds.as_tuple() if f else None,
+                    len(f.text) if f else None,
+                    self._pre_field.as_tuple() if self._pre_field else None,
+                    self._pre_bounds,
+                    [n.bounds.as_tuple() for n in self._row_buttons(root)],
+                    "없음" if self._pre_icons is None else len(self._pre_icons),
+                )
                 raise BackendDown("전송 버튼 없음(셀렉터 확인 필요)")
             # 느린 휴대폰(노트9)은 전송 결과가 트리에 몇 초 늦게 반영된다. 한 번만 보고 다시 누르면 이미 보낸
             # 뒤라 헛누름(또는 중복 전송)이 된다 → 잠시 여러 번 본다

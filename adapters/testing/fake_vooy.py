@@ -77,6 +77,8 @@ class _Xml:
 class FakeVooyDevice:
     def __init__(self, serial: str = "fake") -> None:
         self.serial = serial
+        # True 면 입력창에 글이 있을 때만 전송 버튼을 그린다(새 Vooy 앱)
+        self.send_only_with_text = False
         self.dir = Path(os.environ.get("FAKE_VOOY_DIR", "/data/fake-vooy"))
         self.dir.mkdir(parents=True, exist_ok=True)
         self.latency = float(os.environ.get("FAKE_VOOY_LATENCY", "1.0"))
@@ -247,8 +249,12 @@ class FakeVooyDevice:
         x.close()
         x.open("android.view.ViewGroup", (42, 2040, 1038, 2183), rid="composer-input-pill")
         x.leaf("android.widget.EditText", (155, 2066, 794, 2156), desc="Message", text=self.input, clickable=True)
-        x.leaf("android.widget.Button", (925, 2067, 1014, 2156), desc="Send message", clickable=True)
-        self._targets.append(((925, 2067, 1014, 2156), self._send))
+        if self.input or not self.send_only_with_text:
+            x.leaf("android.widget.Button", (925, 2067, 1014, 2156), desc="Send message", clickable=True)
+            self._targets.append(((925, 2067, 1014, 2156), self._send))
+        else:
+            # 새 Vooy(2026-11-17 노트9): 입력창이 비어 있으면 전송 버튼 대신 음성 버튼만 보인다
+            x.leaf("android.widget.Button", (845, 2067, 1014, 2156), desc="Start voice chat", clickable=True)
         self._targets.append(((155, 2066, 794, 2156), lambda: None))
         x.close()
         # 응답 중에는 하단 vooy 탭 설명이 "Done" 이 아니게 바뀐다(실기기 확인값은 Done/대기 중 뿐, 응답 중 값은 흉내)
