@@ -56,6 +56,9 @@ async def test_delete_cascades(authed, db):
     db.add(ToolCall(id="toolu_1", run_id=run.id, bot_name="mock-a"))
     await db.commit()
 
+    # 영구 삭제는 휴지통을 거친다
+    assert (await authed.delete(f"/api/sessions/{sid}")).status_code == 409
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"trashed": True})).status_code == 200
     assert (await authed.delete(f"/api/sessions/{sid}")).status_code == 204
     assert (await authed.get(f"/api/sessions/{sid}")).status_code == 404
     for model in (Message, Run, ToolCall):
@@ -100,3 +103,50 @@ async def test_messages_isolated_per_session(authed, db):
                 Message(session_id=b, role=MessageRole.user, raw="b", seq=1)])
     await db.commit()
     assert [m["raw"] for m in (await authed.get(f"/api/sessions/{a}/messages")).json()] == ["a"]
+
+
+async def test_groups_and_moving_sessions(authed):
+    g1 = (await authed.post("/api/groups", json={"name": " 여행 "})).json()
+    g2 = (await authed.post("/api/groups", json={"name": "업무"})).json()
+    assert g1["name"] == "여행" and g2["position"] > g1["position"]
+    assert [g["name"] for g in (await authed.get("/api/groups")).json()] == ["여행", "업무"]
+
+    sid = (await authed.post("/api/sessions", json={"title": "제주", "group_id": g1["id"]})).json()["id"]
+    r = await authed.patch(f"/api/sessions/{sid}", json={"group_id": g2["id"]})
+    assert r.json()["group_id"] == g2["id"]
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"group_id": str(uuid.uuid4())})).status_code == 404
+    # null 이면 그룹 없음
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"group_id": None})).json()["group_id"] is None
+
+    await authed.patch(f"/api/sessions/{sid}", json={"group_id": g1["id"]})
+    assert (await authed.patch(f"/api/groups/{g1['id']}", json={"name": "국내 여행"})).json()["name"] == "국내 여행"
+    # 그룹을 지우면 세션은 그룹 없음으로 남는다
+    assert (await authed.delete(f"/api/groups/{g1['id']}")).status_code == 204
+    s = (await authed.get(f"/api/sessions/{sid}")).json()
+    assert s["group_id"] is None and s["title"] == "제주"
+    assert [g["name"] for g in (await authed.get("/api/groups")).json()] == ["업무"]
+
+
+async def test_trash_restore_and_empty(authed):
+    a = (await authed.post("/api/sessions", json={"title": "a"})).json()["id"]
+    b = (await authed.post("/api/sessions", json={"title": "b"})).json()["id"]
+    r = await authed.patch(f"/api/sessions/{a}", json={"trashed": True})
+    assert r.json()["trashed_at"] is not None
+    assert [x["id"] for x in (await authed.get("/api/sessions")).json()] == [b]
+    assert [x["id"] for x in (await authed.get("/api/sessions?trashed=true")).json()] == [a]
+    # 되살리기
+    assert (await authed.patch(f"/api/sessions/{a}", json={"trashed": False})).json()["trashed_at"] is None
+    assert len((await authed.get("/api/sessions")).json()) == 2
+    # 비우기는 휴지통만
+    await authed.patch(f"/api/sessions/{b}", json={"trashed": True})
+    assert (await authed.delete("/api/trash")).status_code == 204
+    assert (await authed.get(f"/api/sessions/{b}")).status_code == 404
+    assert (await authed.get(f"/api/sessions/{a}")).status_code == 200
+
+
+async def test_session_model(authed):
+    sid = (await authed.post("/api/sessions", json={"model": "opus"})).json()["id"]
+    assert (await authed.get(f"/api/sessions/{sid}")).json()["model"] == "opus"
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"model": "sonnet"})).json()["model"] == "sonnet"
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"model": None})).json()["model"] is None
+    assert (await authed.patch(f"/api/sessions/{sid}", json={"model": "gpt"})).status_code == 422

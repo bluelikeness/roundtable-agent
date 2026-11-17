@@ -204,6 +204,9 @@ class RunManager:
             s = await db.get(ChatSession, sid)
             if s is None:
                 raise SendError("session_not_found")
+            if s.trashed_at is not None:
+                # 휴지통의 세션은 읽기 전용. 되살린 뒤에 보낸다
+                raise SendError("session_trashed")
             msg = Message(id=uuid.uuid4(), session_id=sid, role=MessageRole.user, raw=text)
             run = Run(id=uuid.uuid4(), session_id=sid, user_message_id=msg.id, status=RunStatus.queued)
             s.last_message_at = _now()
@@ -341,7 +344,8 @@ class RunManager:
             last_final=last_final,
             last_bot_raws={name: raw for name, raw in bot_rows if name},
             bots=bots,
-            model=q.model or "sonnet",
+            # 보낼 때 고른 모델 → 세션에 저장된 모델 → 기본
+            model=q.model or s.model or "sonnet",
             force_new=force_new,
         )
 

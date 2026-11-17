@@ -7,6 +7,8 @@ interface Props {
   chat: ChatState | null;
   ws: WsStatus;
   model: string | null;
+  /** 세션 모델 바꾸기(null = 기본). 없으면 배지만 보인다 */
+  onModel?: (model: "sonnet" | "opus" | null) => void;
   onStop: (runId: string) => void;
   leading?: ReactNode;
   trailing?: ReactNode;
@@ -40,7 +42,7 @@ const WS_TEXT: Record<WsStatus, string> = {
   rejected: "연결 거부됨",
 };
 
-export function RunHeader({ title, chat, ws, model, onStop, leading, trailing }: Props) {
+export function RunHeader({ title, chat, ws, model, onModel, onStop, leading, trailing }: Props) {
   const status = statusText(chat);
   const current = chat?.runs.current ?? null;
   return (
@@ -52,7 +54,21 @@ export function RunHeader({ title, chat, ws, model, onStop, leading, trailing }:
       <div className="status" data-testid="run-status">
         {status}
       </div>
-      {model && <span className="badge">{model}</span>}
+      {onModel ? (
+        <select
+          className="model-select"
+          aria-label="이 세션의 Claude 모델"
+          title="이 세션의 Claude 모델"
+          value={model ?? ""}
+          onChange={(e) => onModel((e.target.value || null) as "sonnet" | "opus" | null)}
+        >
+          <option value="">기본(Sonnet)</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="opus">Opus</option>
+        </select>
+      ) : (
+        model && <span className="badge">{model}</span>
+      )}
       {WS_TEXT[ws] && <span className={`badge ${ws === "open" ? "" : "warn"}`}>{WS_TEXT[ws]}</span>}
       {current && (
         <button className="btn small" onClick={() => onStop(current)}>

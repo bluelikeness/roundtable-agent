@@ -80,7 +80,7 @@ async def _find_room(
         (
             await db.execute(
                 select(ChatSession)
-                .where(ChatSession.archived.is_(False))
+                .where(ChatSession.archived.is_(False), ChatSession.trashed_at.is_(None))
                 .order_by(ChatSession.last_message_at.desc().nulls_last())
             )
         )
