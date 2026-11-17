@@ -131,6 +131,8 @@ services:
     environment:
       PHONE_WATCH_PKGS: com.vooy.mobile,com.pickle.client,com.facebook.aura,ai.manus.agents
       PHONE_SCREEN_OFF_AFTER_S: ${PHONE_SCREEN_OFF_AFTER_S:-30}
+      # 우선 휴대폰(기기 이름 일부). 이 폰이 들어오면 붙어 있던 다른 폰을 끊는다. 비면 먼저 붙은 폰을 지킨다
+      PHONE_PREFER_DEVICE: ${PHONE_PREFER_DEVICE:-}
       PHONE_APK_DIR: /srv/phone-dist
     secrets:
       - hub_adapter_token

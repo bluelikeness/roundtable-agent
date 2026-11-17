@@ -249,11 +249,16 @@ class Gateway:
             android=str(hello["android"]) if hello.get("android") else None,
         )
         old = self.link
+        prefer = read_prefer_device()
+        # 우선 휴대폰(PHONE_PREFER_DEVICE)이 들어오면 붙어 있던 다른 휴대폰을 끊고 자리를 넘긴다.
+        # 끊긴 쪽은 다시 붙으려 해도 아래 규칙(살아 있는 쪽을 지킨다)으로 거절된다
+        takes_over = bool(prefer) and prefer in link.device and (old is None or prefer not in old.device)
         if (
             old is not None
             and not old.closed
             and old.device != link.device
             and time.monotonic() - old.last_seen < DEAD_AFTER_S
+            and not takes_over
         ):
             # 같은 토큰을 가진 다른 휴대폰. 새 연결이 이전 연결을 끊으면 두 휴대폰이 서로 밀어내며 끝없이
             # 재연결한다 → 살아 있는 쪽을 지키고 새로 온 쪽을 돌려보낸다(같은 휴대폰의 재연결은 아래처럼 교체)
@@ -271,6 +276,8 @@ class Gateway:
                 await old.ws.close(code=4409)
             except Exception:  # noqa: BLE001 - 이미 끊긴 소켓
                 pass
+        if takes_over and old is not None and old.device != link.device:
+            log.warning("우선 휴대폰 %s 연결 → %s 연결을 끊음", link.device, old.device)
         log.info("휴대폰 연결: %s (안드로이드 %s, 워커 %s)", link.device, link.android or "?", link.version)
         if hello.get("last_error"):
             log.warning("휴대폰이 알린 직전 끊김 이유: %s", str(hello["last_error"])[:300])
@@ -518,6 +525,11 @@ class Gateway:
                 await guarded(scope, receive, send)
 
         return dispatch
+
+
+def read_prefer_device() -> str:
+    """우선 휴대폰. 기기 이름(hello.device)의 일부, 예: "SM-S938N". 비면 먼저 붙은 휴대폰을 지킨다."""
+    return os.environ.get("PHONE_PREFER_DEVICE", "").strip()
 
 
 def read_device_token() -> str:
