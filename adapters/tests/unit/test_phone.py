@@ -94,6 +94,27 @@ async def test_other_phone_is_turned_away_while_first_is_alive(stack):
     assert gw.link is not None and gw.link.device == "fake-phone" and not gw.link.closed
 
 
+async def test_preferred_phone_takes_over(stack, monkeypatch):
+    """PHONE_PREFER_DEVICE 의 휴대폰은 붙어 있던 다른 휴대폰을 끊고 자리를 넘겨받는다. 끊긴 쪽은 다시 거절된다."""
+    base, gw, _ = stack
+    monkeypatch.setenv("PHONE_PREFER_DEVICE", "ULTRA")
+    pref = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
+    pref.device_name = "samsung ULTRA-25"
+    task = asyncio.create_task(pref.run_once())
+    for _ in range(100):
+        if gw.link is not None and gw.link.device == "samsung ULTRA-25":
+            break
+        await asyncio.sleep(0.05)
+    assert gw.link is not None and gw.link.device == "samsung ULTRA-25"
+    # 밀려난 휴대폰이 다시 붙으려 하면 거절
+    again = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
+    again.device_name = "fake-phone"
+    with pytest.raises(Exception):
+        await asyncio.wait_for(again.run_once(), 5)
+    assert gw.link.device == "samsung ULTRA-25"
+    task.cancel()
+
+
 async def test_screen_commands_need_lease(stack):
     base, _, _ = stack
     async with _client(base) as c:
