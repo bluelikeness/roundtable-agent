@@ -136,7 +136,9 @@ class VooyAdapter(AndroidAdapter):
             root = await self._tree()
             if self._is_login_screen(root):
                 raise LoginRequired("Vooy 로그인 화면")
-            if root.find(**self.sel["input"]) and root.find(**self.sel["send"]):
+            # 입력창만 보면 된다. 새 Vooy(2026-11-17 노트9)는 입력창이 비면 전송 버튼 대신 음성 버튼을 보이고,
+            # 글을 넣은 뒤에야 전송 버튼이 나온다(_tap_send 가 그때 화면을 다시 읽어 찾는다)
+            if root.find(**self.sel["input"]):
                 return
             home = root.find(**self.sel["home_tab"])
             if home is not None:

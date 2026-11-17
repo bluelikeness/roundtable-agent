@@ -582,3 +582,73 @@ async def test_guessed_send_that_leaves_chat_is_failure(tmp_path, monkeypatch):
     assert pressed == ["appeared"]
     assert a._confirm_root is None
     assert a.learned.get(a._app_key, "send") is None
+
+
+def test_cue_button_row_below_input_inside_input_box(tmp_path):
+    """2026-11-17 울트라25 Cue: 버튼 줄이 글 칸 아래(같은 입력 상자 틀 안)에 있다. 글 칸 높이 안에 버튼이 없으면
+    틀 안의 버튼 줄을 본다. 틀 밖(아래 하단 탭)은 여전히 후보가 아니다."""
+    from adapters.android_base import Bounds, parse_hierarchy
+
+    def node(cls: str, b: str, click: str = "true", inner: str = "") -> str:
+        return f'<node class="{cls}" package="ai.manus.agents" text="" content-desc="" clickable="{click}" bounds="{b}">{inner}</node>'
+
+    xml = (
+        "<hierarchy>"
+        + node(
+            "android.view.View",
+            "[0,0][1440,3120]",
+            "false",
+            node(
+                "android.view.View",
+                "[0,1378][1440,1730]",
+                "true",
+                node("android.view.View", "[75,1404][1346,1554]", "true", node("android.widget.EditText", "[75,1404][1346,1554]"))
+                + node("android.widget.ImageView", "[75,1565][210,1700]")
+                + node("android.widget.ImageView", "[1065,1565][1200,1700]")
+                + node("android.widget.ImageView", "[1230,1565][1365,1700]"),
+            )
+            + node("android.view.View", "[1000,1745][1353,1900]"),  # 틀 밖 아래(탭 같은 것)
+        )
+        + "</hierarchy>"
+    )
+    a = _bot_adapter("cue", tmp_path)
+    a._pre_field = Bounds(75, 1404, 1346, 1554)
+    row = a._row_buttons(parse_hierarchy(xml))
+    assert sorted(n.bounds.as_tuple() for n in row) == [(1065, 1565, 1200, 1700), (1230, 1565, 1365, 1700)]
+
+
+def test_cue_button_row_below_multiline_input(tmp_path):
+    """같은 날 울트라25 Cue: 글이 여러 줄이 되면 글 칸(1314~1554)만 감싼 좁은 틀이 생기고, 글 칸이 바깥 틀 위로
+    넘친다. 가장 가까운 틀이 아니라 버튼 후보가 든 가장 가까운 틀에서 버튼 줄(1573~1708)을 찾는다."""
+    from adapters.android_base import Bounds, parse_hierarchy
+
+    def node(cls: str, b: str, click: str = "true", inner: str = "") -> str:
+        return f'<node class="{cls}" package="ai.manus.agents" text="" content-desc="" clickable="{click}" bounds="{b}">{inner}</node>'
+
+    xml = (
+        "<hierarchy>"
+        + node(
+            "android.view.View",
+            "[0,0][1440,3120]",
+            "false",
+            node(
+                "android.view.View",
+                "[0,1378][1440,1730]",  # 바깥 틀은 한 줄일 때 크기 그대로(글 칸이 위로 넘친다)
+                "false",
+                node(
+                    "android.view.View",
+                    "[60,1300][1360,1560]",  # 글 칸만 감싼 좁은 틀(버튼 없음)
+                    "false",
+                    node("android.widget.EditText", "[75,1314][1346,1554]"),
+                )
+                + node("android.widget.ImageView", "[75,1573][210,1708]")
+                + node("android.widget.ImageView", "[1238,1573][1373,1708]"),
+            )
+            + node("android.view.View", "[1000,1745][1353,1900]"),  # 틀 밖 아래(탭 같은 것)
+        )
+        + "</hierarchy>"
+    )
+    a = _bot_adapter("cue", tmp_path)
+    a._pre_field = Bounds(188, 1565, 1223, 1715)
+    row = a._row_buttons(parse_hierarchy(xml))
+    assert [n.bounds.as_tuple() for n in row] == [(1238, 1573, 1373, 1708)]

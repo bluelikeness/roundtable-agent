@@ -116,6 +116,14 @@ async def test_ask_echo_starts_app_and_collects_below_own_bubble(vooy):
     assert r2.raw == "echo: 두 번째" and not set(r.message_ids) & set(r2.message_ids)
 
 
+async def test_send_button_only_after_typing(vooy):
+    """새 Vooy 는 입력창이 비면 전송 버튼이 없다(음성 버튼만). 대화방 준비로 보고 글을 넣은 뒤 전송한다."""
+    vooy.device.send_only_with_text = True
+    r = await vooy.ask("전송 버튼이 늦게 나오는 앱", "t1")
+    assert r.ok, r
+    assert r.raw == "echo: 전송 버튼이 늦게 나오는 앱"
+
+
 async def test_buttons_and_tap(vooy):
     r = await vooy.ask("[vooy:buttons] 강남 식당", "t1")
     assert r.ok, r
