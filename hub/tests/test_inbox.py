@@ -18,7 +18,12 @@ TOKEN = "inbox-test-token-0123456789abcdefghij"
 def inbox_on():
     base = get_settings()
     app.dependency_overrides[get_settings] = lambda: Settings(
-        **{**base.model_dump(), "inbox_token": TOKEN, "inbox_per_minute": 3}
+        **{
+            **base.model_dump(),
+            "inbox_token": TOKEN,
+            "inbox_per_minute": 3,
+            "inbox_wait_s": 5,
+        }
     )
     inbox_mod._recent.clear()
     yield
@@ -65,8 +70,9 @@ async def test_posts_into_room_and_runs(client, db, inbox_on, fake_runner):  # n
         json={"room": "주말회의방", "text": "토요일이 좋아요", "from": "피클"},
         headers=_h(),
     )
-    assert r.status_code == 202, r.text
+    assert r.status_code == 200, r.text
     body = r.json()
+    assert body["status"] == "done" and body["answer"] == "내일은 맑습니다"
     assert body["room"] == "주말 회의방"
     assert body["session_id"] == str(rooms["주말 회의방"].id)
     msg = (
@@ -93,7 +99,7 @@ async def test_posts_into_room_and_runs(client, db, inbox_on, fake_runner):  # n
 async def test_partial_match_and_not_found(client, db, inbox_on, fake_runner):  # noqa: F811
     await _rooms(db, "주말 회의방", "주말 여행", "독서", archived="보관된 방")
     r = await client.post("/api/inbox", json={"room": "독", "text": "x"}, headers=_h())
-    assert r.status_code == 202
+    assert r.status_code == 200
     # 부분 일치가 둘 이상이면 고르지 않고 후보를 돌려준다
     r = await client.post(
         "/api/inbox", json={"room": "주말", "text": "x"}, headers=_h()
@@ -126,4 +132,43 @@ async def test_limits(client, db, inbox_on, fake_runner):  # noqa: F811
         ).status_code
         for i in range(4)
     ]
-    assert codes == [202, 202, 202, 429]
+    assert codes == [200, 200, 200, 429]
+
+
+async def test_long_run_returns_result_url_then_get(client, db, inbox_on, fake_runner):  # noqa: F811
+    await _rooms(db, "방")
+    # 입구는 글 앞에 표시를 붙이므로 FakeRunner 의 "block"(release 까지 멈춤)을 직접 걸어 긴 실행을 흉내 낸다
+    orig = fake_runner.start
+
+    async def start(session, text):
+        async for ev in orig(session, "block"):
+            yield ev
+
+    fake_runner.start = start
+    r = await client.post(
+        "/api/inbox", json={"room": "방", "text": "길게", "from": "피클"}, headers=_h()
+    )
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["status"] == "running" and body["retry_after_s"] >= 5
+    assert r.headers["retry-after"] == str(body["retry_after_s"])
+    url = body["result_url"]
+    assert url == f"/api/inbox/runs/{body['run_id']}"
+    r = await client.get(url, headers=_h())
+    assert r.status_code == 202 and r.json()["status"] == "running"
+    assert (await client.get(url)).status_code == 401
+    fake_runner.release.set()
+    for _ in range(100):
+        r = await client.get(url, headers=_h())
+        if r.status_code == 200:
+            break
+        await asyncio.sleep(0.02)
+    assert r.status_code == 200
+    assert r.json()["status"] == "done" and r.json()["answer"] == "내일은 맑습니다"
+
+
+async def test_get_hides_runs_not_from_inbox(client, db, inbox_on, fake_runner):  # noqa: F811
+    rooms = await _rooms(db, "방")
+    ack = await app.state.run_manager.send(rooms["방"].id, "웹에서 쓴 말", None)
+    r = await client.get(f"/api/inbox/runs/{ack.payload.run_id}", headers=_h())
+    assert r.status_code == 404

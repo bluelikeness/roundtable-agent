@@ -1,7 +1,15 @@
 // 스토어 리듀서: 고정 이벤트 시퀀스 → 스냅샷 (docs/05-ui.md 8장 테스트)
 import { describe, expect, it } from "vitest";
 import type { HubEvent, MessageOut } from "../api/types";
-import { addOptimisticUser, applyEvent, emptyChat, headerStatus, loadMessages, type ChatState } from "./chat";
+import {
+  ackNeedsFetch,
+  addOptimisticUser,
+  applyEvent,
+  emptyChat,
+  headerStatus,
+  loadMessages,
+  type ChatState,
+} from "./chat";
 
 const S = "11111111-1111-1111-1111-111111111111";
 const R1 = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -165,5 +173,22 @@ describe("chat reducer", () => {
     expect(c.lastMessageSeq).toBe(7);
     // 같은 메시지를 다시 합쳐도 늘지 않는다(재연결 since_seq 겹침)
     expect(loadMessages(c, rest).items).toHaveLength(5);
+  });
+});
+
+describe("바깥에서 들어온 사용자 메시지(ack 에 글 없음)", () => {
+  it("낙관적 말풍선이 없을 때만 REST 로 다시 읽는다", () => {
+    const ack = ev("message.ack", { message_id: "u9", run_id: R1, status: "running" });
+    expect(ackNeedsFetch(emptyChat(), ack)).toBe(true);
+    const mine = addOptimisticUser(emptyChat(), "내가 쓴 말", ts(1));
+    expect(ackNeedsFetch(mine, ack)).toBe(false);
+    // 이미 받은 seq(재전송)는 다시 읽지 않는다
+    const seen = applyEvent(emptyChat(), ack);
+    const fromRest = loadMessages(seen, [
+      { id: "u9", session_id: S, role: "user", bot_name: null, raw: "(피클에서 보낸 의견) 안녕", structured: null, seq: ack.seq!, created_at: ack.ts },
+    ] as MessageOut[]);
+    expect(ackNeedsFetch(fromRest, ack)).toBe(false);
+    expect(view(fromRest).items).toContain(`${ack.seq} user: (피클에서 보낸 의견) 안녕`);
+    expect(ackNeedsFetch(emptyChat(), ev("claude.note", { run_id: R1, text: "x" }))).toBe(false);
   });
 });
