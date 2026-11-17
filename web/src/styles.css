@@ -77,6 +77,10 @@ button {
   padding: 3px 10px;
   font-size: 13px;
 }
+.btn.danger {
+  color: var(--warn);
+  border-color: var(--warn);
+}
 .btn.block {
   width: 100%;
 }
@@ -182,12 +186,177 @@ button {
   gap: 6px;
   padding: 12px;
 }
+.sessions-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
 .sessions ul {
   list-style: none;
   margin: 0;
   padding: 0 6px;
-  overflow-y: auto;
+}
+/* 세션 그룹·휴지통 */
+.ico {
+  flex: none;
+  display: block;
+}
+.icon .ico {
+  margin: auto;
+}
+.chevron {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+.chevron.open {
+  transform: rotate(90deg);
+}
+.group-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 6px 2px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.group-head:hover {
+  background: var(--line);
+}
+.group-head .icon {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+.group-head.loose {
+  cursor: default;
+}
+.group-head.loose:hover {
+  background: none;
+}
+.group-name {
   flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group-count {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 마우스가 있는 화면에서만 ⋯ 를 올렸을 때 보인다(터치는 항상 보인다) */
+@media (hover: hover) {
+  .group-head .icon,
+  .session-item .icon {
+    opacity: 0;
+  }
+  .group-head:hover .icon,
+  .session-item:hover .icon,
+  .session-item.active .icon,
+  .group-head .icon:focus-visible,
+  .session-item .icon:focus-visible {
+    opacity: 1;
+  }
+}
+/* 드래그: 놓을 수 있는 곳 표시 */
+.group,
+.loose,
+.trash {
+  border-radius: 8px;
+  transition: background 0.1s ease, box-shadow 0.1s ease;
+}
+.sessions.dragging .loose {
+  min-height: 36px;
+}
+.drop-over {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.trash.drop-over {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+}
+.trash.drop-over .group-head {
+  color: var(--warn);
+}
+.session-item {
+  user-select: none;
+}
+.session-item input {
+  user-select: text;
+}
+.sessions.dragging,
+.sessions.dragging * {
+  cursor: grabbing !important;
+}
+.session-item.drag-source {
+  opacity: 0.45;
+}
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px var(--shadow);
+  pointer-events: none;
+}
+.trash {
+  margin: 10px 0 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding-top: 4px;
+}
+.trash .btn.block {
+  margin: 6px 12px 0;
+  width: calc(100% - 24px);
+}
+.trash-empty {
+  margin: 4px 30px;
+  font-size: 13px;
+}
+.session-item.trashed {
+  cursor: default;
+  color: var(--muted);
+}
+.session-item.trashed:hover {
+  background: none;
+}
+.session-model {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.model-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 4px;
 }
 .session-item {
   position: relative;

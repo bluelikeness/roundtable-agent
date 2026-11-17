@@ -27,7 +27,7 @@ async function submit(text: string, sid: string | null): Promise<boolean> {
       openSession(null);
       return true;
     case "model":
-      setModel(sid, cmd.model);
+      await setModel(sid, cmd.model);
       return true;
     case "stop":
       if (chat?.runs.current) stopRun(chat.runs.current);
@@ -57,7 +57,7 @@ export function ChatView({ leading, trailing }: ChatViewProps) {
   const ws = useStore((s) => s.ws);
   const bots = useStore((s) => s.bots);
   const notice = useStore((s) => s.notice);
-  useStore((s) => s.models); // 모델 배지 갱신
+  useStore((s) => s.draft); // 새 세션 모델 선택 갱신
   const queued = chat?.runs.queued ?? [];
   const title = activeId ? (session?.title ?? "새 세션") : "새 세션";
 
@@ -68,6 +68,7 @@ export function ChatView({ leading, trailing }: ChatViewProps) {
         chat={chat}
         ws={ws}
         model={modelOf(activeId)}
+        onModel={(m) => void setModel(activeId, m)}
         onStop={stopRun}
         leading={leading}
         trailing={trailing}

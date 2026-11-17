@@ -16,12 +16,28 @@ export type {
 } from "../types/events";
 
 /** GET /api/sessions 항목 (hub/app/schemas.py SessionOut) */
+export type ModelName = "sonnet" | "opus";
+
 export interface SessionOut {
   id: string;
   title: string | null;
   created_at: string;
   last_message_at: string | null;
   archived: boolean;
+  /** 세션 그룹. null = 그룹 없음 */
+  group_id: string | null;
+  /** 세션별 Claude 모델. null = 기본(sonnet) */
+  model: ModelName | null;
+  /** 휴지통으로 옮긴 시각. null = 휴지통 아님 */
+  trashed_at: string | null;
+}
+
+/** GET /api/groups 항목 (hub/app/schemas.py GroupOut) */
+export interface GroupOut {
+  id: string;
+  name: string;
+  position: number;
+  created_at: string;
 }
 
 export type MessageRole = "user" | "claude" | "bot" | "system";
