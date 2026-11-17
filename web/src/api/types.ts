@@ -79,6 +79,24 @@ export interface LoginSubmitResult {
 export type BotLogEntry = Record<string, unknown>;
 
 /** GET /api/claude/status: 봇 상태 패널 하단 Claude Code 섹션 */
+/** 사용할 폰(GET /api/phone) */
+export interface PhoneRow {
+  device: string;
+  android: string | null;
+  sdk: number | null;
+  version: string | null;
+  last_seen_at: number | null;
+  connected: boolean;
+  preferred: boolean;
+}
+
+export interface PhoneOut {
+  /** 우선 휴대폰(기기 이름). "" 이면 먼저 붙은 폰 */
+  prefer: string;
+  current: string | null;
+  devices: PhoneRow[];
+}
+
 export interface ClaudeStatus {
   runner_ok: boolean;
   runs_today: number;

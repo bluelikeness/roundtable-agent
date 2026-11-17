@@ -888,6 +888,31 @@ button {
   top: 26px;
   right: 0;
 }
+.phone-section {
+  margin: auto 12px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.phone-section + .claude-section {
+  margin-top: 10px;
+}
+.phone-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.phone-select {
+  width: 100%;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+.phone-state {
+  margin-top: 4px;
+}
+.phone-state.down {
+  color: var(--down);
+}
 .claude-section {
   margin: auto 12px 12px;
   padding-top: 10px;

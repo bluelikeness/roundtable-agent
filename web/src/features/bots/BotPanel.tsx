@@ -13,6 +13,7 @@ import {
   setUi,
   useStore,
 } from "../../store";
+import { PhoneSection } from "./PhoneSection";
 import { formatTokens, rowView } from "./status";
 
 function useMinuteTick(): number {
@@ -138,6 +139,7 @@ export function BotPanelBody() {
         ))}
         {bots.length === 0 && <li className="muted">등록된 봇이 없습니다</li>}
       </ul>
+      <PhoneSection />
       <ClaudeSection />
     </>
   );

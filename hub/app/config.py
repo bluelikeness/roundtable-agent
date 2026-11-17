@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     health_interval_s: float = 30
     # "오늘" 실행 횟수·토큰을 셀 때의 UTC 오프셋(시간). 봇 상태 패널 Claude Code 섹션. 기본 KST
     day_utc_offset_h: int = 9
+    # 폰 게이트웨이 내부 주소(봇 상태 패널 "사용할 폰"). 비면 이 기능을 끈다
+    phone_gateway_url: str = ""
+    # 우선 휴대폰을 바꾼 뒤 새 폰이 붙기를 기다리는 시간(초). 붙으면 봇 상태를 다시 확인한다
+    phone_switch_wait_s: float = 90
+    # 새 폰이 붙은 뒤에도 사용 불가인 봇(화면 잠금 등)을 이 시간 동안 recheck 간격마다 다시 확인한다.
+    # 잠긴 폰으로 바꾼 직후 확인이 실패하면 다음 5분 주기 확인까지 Claude 도구에서 빠지던 문제
+    phone_switch_recheck_s: float = 180
+    phone_switch_recheck_every_s: float = 10
     # 바깥(피클 등 다른 AI 비서)이 방에 의견을 넣는 입구 POST /api/inbox 의 Bearer 토큰.
     # 비어 있으면 입구를 닫는다(404). 32자 이상 무작위 값
     inbox_token: str = ""

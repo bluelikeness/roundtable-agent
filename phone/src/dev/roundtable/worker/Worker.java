@@ -24,6 +24,11 @@ import java.util.concurrent.Executors;
 final class Worker {
     private static final long PING_MS = 15_000;
     private static final long UPDATE_EVERY_MS = 6 * 60 * 60 * 1000L;
+    /** 다른 휴대폰이 연결 중이라 거절(4423)됐을 때 다시 붙어 보기까지. 우선 폰으로 바뀌면 이만큼 안에 넘겨받는다 */
+    private static final long REJECTED_WAIT_MS = 15_000;
+    /** 연결할 때마다 하는 업데이트 확인의 최소 간격(거절이 반복돼도 latest.json 을 매번 묻지 않게) */
+    private static final long CONNECT_UPDATE_MIN_MS = 10 * 60 * 1000L;
+    private static long lastConnectUpdate = 0;
 
     interface StatusListener { void onStatus(String status); }
 
@@ -149,6 +154,7 @@ final class Worker {
             WsClient c = new WsClient();
             ws = c;
             Thread pinger = null;
+            long openedAt = 0;
             try {
                 setStatus("연결 중… " + URI.create(url).getHost());
                 c.connect(URI.create(url), token, 15_000);
@@ -165,8 +171,11 @@ final class Worker {
                 c.sendText(hello.toString());
                 setStatus("연결됨 · " + URI.create(url).getHost() + " · v" + Updater.currentName(ctx));
                 WLog.add("게이트웨이 연결됨");
-                backoff = 1000;
-                Updater.checkAsync(ctx);
+                openedAt = System.currentTimeMillis();
+                if (System.currentTimeMillis() - lastConnectUpdate > CONNECT_UPDATE_MIN_MS) {
+                    lastConnectUpdate = System.currentTimeMillis();
+                    Updater.checkAsync(ctx);
+                }
                 pinger = new Thread(() -> {
                     long lastUpdate = System.currentTimeMillis();
                     while (running && ws == c) {
@@ -185,7 +194,10 @@ final class Worker {
                 pinger.start();
                 c.readLoop(this::onMessage);
             } catch (Exception e) {
-                if (running) {
+                if (running && c.closeCode == 4423) {
+                    // 다른 휴대폰이 쓰는 중. 끊김으로 남기지 않고 천천히 다시 물어본다
+                    setStatus("대기 중: 다른 휴대폰이 연결돼 있음 · " + (REJECTED_WAIT_MS / 1000) + "초마다 확인");
+                } else if (running) {
                     String why = e.getClass().getSimpleName() + ": " + e.getMessage();
                     lastError = (lastError != null && why.contains("Socket closed")) ? lastError + " → " + why : why;
                     setStatus("끊김: " + e.getMessage() + " · " + (backoff / 1000) + "초 뒤 재연결");
@@ -197,6 +209,13 @@ final class Worker {
                 ws = null;
             }
             if (!running) break;
+            if (c.closeCode == 4423) {
+                backoff = 1000;
+                sleep(REJECTED_WAIT_MS);
+                continue;
+            }
+            // 한동안 붙어 있다 끊긴 경우는 곧바로 다시(재연결이 반복되는 경우만 점점 늦춘다)
+            if (openedAt > 0 && System.currentTimeMillis() - openedAt > 10_000) backoff = 1000;
             sleep(backoff);
             backoff = Math.min(backoff * 2, 30_000);
         }
