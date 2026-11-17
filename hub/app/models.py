@@ -61,6 +61,17 @@ class RunStatus(str, enum.Enum):
     timeout = "timeout"
 
 
+class SessionGroup(Base):
+    """세션 그룹(목록의 폴더). 그룹을 지우면 속한 세션은 그룹 없음이 된다(FK SET NULL)."""
+
+    __tablename__ = "session_group"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    created_at: Mapped[datetime] = _ts()
+
+
 class ChatSession(Base):
     """허브 세션. 테이블 이름은 설계대로 session."""
 
@@ -75,6 +86,12 @@ class ChatSession(Base):
     # 설계 표에 없는 컬럼: WebSocket 이벤트 seq 의 세션별 카운터(05 6장). message 가 없는 이벤트
     # (run.started·bot.pending 등)도 seq 를 쓰므로 message.seq 최대값으로는 이어 붙일 수 없다.
     last_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0", default=0)
+    # 세션 관리(2026-11-17): 그룹, 세션별 Claude 모델(sonnet|opus, 비면 기본), 휴지통으로 옮긴 시각
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("session_group.id", ondelete="SET NULL"), index=True
+    )
+    model: Mapped[str | None] = mapped_column(String(16))
+    trashed_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
 
 
 class Message(Base):

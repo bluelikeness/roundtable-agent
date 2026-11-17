@@ -32,7 +32,7 @@ from app.events import (
 from app.main import app
 from app.models import ChatSession, Message, Run, RunStatus, ToolCall
 from app.runner_protocol import Runner, RunnerSession, ToolCallRecord
-from app.runs import RunManager
+from app.runs import RunManager, SendError
 from tests.conftest import PASSWORD, USERNAME, totp_now
 
 
@@ -244,3 +244,21 @@ async def test_recover_marks_unfinished_runs_failed(db):
     run = (await db.execute(select(Run))).scalars().one()
     await db.refresh(run)
     assert run.status == RunStatus.failed and run.error == "hub_restarted"
+
+
+async def test_session_model_used_and_trashed_session_rejected(wsclient, operator, fake_runner):
+    """세션에 저장한 모델로 돈다(보낼 때 고른 모델이 있으면 그것이 먼저). 휴지통의 세션에는 보낼 수 없다."""
+    async with wsclient() as wsc:
+        await _login(wsc, operator)
+        sid = (await wsc.post("/api/sessions", json={"title": "t", "model": "opus"})).json()["id"]
+        async with aconnect_ws("http://hub.test/ws", wsc) as ws:
+            await ws.send_json({"type": "subscribe", "payload": {"session_id": sid, "since_seq": 0}})
+            await ws.send_json({"type": "send", "session_id": sid, "payload": {"text": "a"}})
+            await _recv_until(ws, "run.finished")
+            await ws.send_json({"type": "send", "session_id": sid, "payload": {"text": "b", "model": "sonnet"}})
+            await _recv_until(ws, "run.finished")
+        assert [s.model for s in fake_runner.sessions] == ["opus", "sonnet"]
+
+        await wsc.patch(f"/api/sessions/{sid}", json={"trashed": True})
+        with pytest.raises(SendError, match="session_trashed"):
+            await app.state.run_manager.send(uuid.UUID(sid), "c", None)

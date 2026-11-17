@@ -1,5 +1,5 @@
 // 허브 REST fetch 래퍼. 인증은 HttpOnly 쿠키라 credentials 만 맞추면 된다.
-import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, LoginSubmitResult, MessageOut, SessionOut } from "./types";
+import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, PhoneOut, LoginSubmitResult, MessageOut, SessionOut, GroupOut, ModelName } from "./types";
 
 export class HttpError extends Error {
   constructor(
@@ -45,10 +45,21 @@ export const api = {
   logout: () => request<void>("POST", "/api/auth/logout"),
 
   listSessions: () => request<SessionOut[]>("GET", "/api/sessions"),
-  createSession: (title: string | null) => request<SessionOut>("POST", "/api/sessions", { title }),
-  updateSession: (id: string, body: { title?: string | null; archived?: boolean }) =>
-    request<SessionOut>("PATCH", `/api/sessions/${id}`, body),
+  listTrash: () => request<SessionOut[]>("GET", "/api/sessions?trashed=true"),
+  createSession: (title: string | null, groupId: string | null = null, model: ModelName | null = null) =>
+    request<SessionOut>("POST", "/api/sessions", { title, group_id: groupId, model }),
+  updateSession: (
+    id: string,
+    body: { title?: string | null; archived?: boolean; group_id?: string | null; model?: ModelName | null; trashed?: boolean },
+  ) => request<SessionOut>("PATCH", `/api/sessions/${id}`, body),
+  /** 영구 삭제(휴지통에 있는 세션만) */
   deleteSession: (id: string) => request<void>("DELETE", `/api/sessions/${id}`),
+  emptyTrash: () => request<void>("DELETE", "/api/trash"),
+  listGroups: () => request<GroupOut[]>("GET", "/api/groups"),
+  createGroup: (name: string) => request<GroupOut>("POST", "/api/groups", { name }),
+  updateGroup: (id: string, body: { name?: string; position?: number }) =>
+    request<GroupOut>("PATCH", `/api/groups/${id}`, body),
+  deleteGroup: (id: string) => request<void>("DELETE", `/api/groups/${id}`),
   listMessages: (id: string, sinceSeq = 0) =>
     request<MessageOut[]>("GET", `/api/sessions/${id}/messages?since_seq=${sinceSeq}`),
 
@@ -67,6 +78,8 @@ export const api = {
   botLogs: (bot: string) => request<BotLogEntry[]>("GET", `/api/bots/${enc(bot)}/logs`),
   restartSession: (id: string) => request<{ ok: boolean; had_session: boolean }>("POST", `/api/sessions/${id}/restart`),
   claudeStatus: () => request<ClaudeStatus>("GET", "/api/claude/status"),
+  phone: () => request<PhoneOut>("GET", "/api/phone"),
+  setPhone: (device: string) => request<PhoneOut>("PUT", "/api/phone/prefer", { device }),
 };
 
 const enc = encodeURIComponent;

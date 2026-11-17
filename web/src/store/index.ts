@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { api, HttpError } from "../api/rest";
-import type { BotInfo, BotStatusPayload, ClaudeStatus, HubEvent, SessionOut } from "../api/types";
+import type { BotInfo, BotStatusPayload, ClaudeStatus, GroupOut, HubEvent, SessionOut } from "../api/types";
 import { HubSocket, type WsStatus } from "../api/ws";
 import { ackNeedsFetch, addOptimisticUser, applyEvent, emptyChat, loadMessages, type ChatState } from "./chat";
 
@@ -45,12 +45,16 @@ export interface AppState {
   ui: UiState;
   ws: WsStatus;
   notice: Notice | null;
-  /** 세션별 모델(/model). 허브에 저장할 곳이 없어 이 브라우저에만 둔다 */
-  models: Record<string, Model>;
+  /** 세션 그룹(GET /api/groups, position 순) */
+  groups: GroupOut[];
+  /** 휴지통의 세션(목록을 펼칠 때 불러온다) */
+  trash: SessionOut[];
+  /** 아직 DB 에 없는 새 세션에 쓸 모델·그룹(첫 메시지 때 세션과 함께 만든다) */
+  draft: { model: Model | null; groupId: string | null };
 }
 
+// 세션별 모델은 허브(session.model)에 둔다. 예전에 이 브라우저에만 저장한 선택은 처음 불러올 때 허브로 옮긴다
 const MODEL_KEY = "roundtable.models";
-// 이름을 바꾸기 전(multibot)에 저장한 모델 선택도 읽는다
 const OLD_MODEL_KEY = "multibot.models";
 const TITLE_LEN = 20;
 
@@ -62,11 +66,12 @@ function readModels(): Record<string, Model> {
   }
 }
 
-function writeModels(m: Record<string, Model>) {
+function clearLocalModels() {
   try {
-    localStorage.setItem(MODEL_KEY, JSON.stringify(m));
+    localStorage.removeItem(MODEL_KEY);
+    localStorage.removeItem(OLD_MODEL_KEY);
   } catch {
-    // 저장 불가(사생활 모드 등) — 이번 탭에서만 유지
+    // 저장소를 못 쓰는 환경 — 무시
   }
 }
 
@@ -82,7 +87,9 @@ export const useStore = create<AppState>(() => ({
   ui: { drawer: false, botSheet: false, botPanelCollapsed: false, sheet: null },
   ws: "closed",
   notice: null,
-  models: readModels(),
+  groups: [],
+  trash: [],
+  draft: { model: null, groupId: null },
 }));
 
 const set = useStore.setState;
@@ -102,7 +109,7 @@ function updateChat(sid: string, f: (c: ChatState) => ChatState) {
   set((s) => ({ chats: { ...s.chats, [sid]: f(s.chats[sid] ?? emptyChat()) } }));
 }
 
-function errorText(e: unknown): string {
+export function errorText(e: unknown): string {
   if (e instanceof HttpError) return `허브 오류 (${e.status} ${e.code})`;
   return "허브에 연결할 수 없습니다";
 }
@@ -241,10 +248,26 @@ async function afterLogin() {
 
 export async function loadSessions() {
   try {
-    set({ sessions: await api.listSessions() });
+    const [sessions, groups] = await Promise.all([api.listSessions(), api.listGroups()]);
+    set({ sessions, groups });
+    await migrateLocalModels(sessions);
   } catch (e) {
     notify(errorText(e), "warn");
   }
+}
+
+/** 예전 버전이 이 브라우저에만 저장한 세션별 모델을 허브로 옮긴다(허브에 값이 없는 세션만) */
+async function migrateLocalModels(sessions: SessionOut[]) {
+  const local = readModels();
+  const todo = sessions.filter((s) => !s.model && local[s.id]);
+  for (const s of todo) {
+    try {
+      replaceSession(await api.updateSession(s.id, { model: local[s.id] }));
+    } catch {
+      return; // 다음 접속 때 다시 시도
+    }
+  }
+  if (Object.keys(local).length) clearLocalModels();
 }
 
 export async function loadBots() {
@@ -371,13 +394,118 @@ export async function archiveSession(sid: string) {
   }
 }
 
-export async function deleteSession(sid: string) {
+function replaceSession(s: SessionOut) {
+  set((st) => ({ sessions: st.sessions.map((x) => (x.id === s.id ? s : x)) }));
+}
+
+/** 다른 그룹으로 옮기기. groupId=null 이면 그룹 없음 */
+export async function moveSession(sid: string, groupId: string | null) {
   try {
-    await api.deleteSession(sid);
-    dropSession(sid);
+    replaceSession(await api.updateSession(sid, { group_id: groupId }));
   } catch (e) {
     notify(errorText(e), "warn");
   }
+}
+
+/** 휴지통으로(되살릴 수 있다) */
+export async function trashSession(sid: string) {
+  try {
+    const s = await api.updateSession(sid, { trashed: true });
+    dropSession(sid);
+    set((st) => ({ trash: [s, ...st.trash] }));
+    notify("휴지통으로 옮겼습니다");
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+export async function loadTrash() {
+  try {
+    set({ trash: (await api.listTrash()) ?? [] });
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+export async function restoreSession(sid: string) {
+  try {
+    const s = await api.updateSession(sid, { trashed: false });
+    set((st) => ({
+      trash: st.trash.filter((x) => x.id !== sid),
+      sessions: s.archived ? st.sessions : sortSessions([s, ...st.sessions]),
+    }));
+    notify("되살렸습니다");
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+/** 영구 삭제(휴지통에 있는 세션만, 되돌릴 수 없다) */
+export async function deleteForever(sid: string) {
+  try {
+    await api.deleteSession(sid);
+    set((st) => ({ trash: st.trash.filter((x) => x.id !== sid) }));
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+export async function emptyTrash() {
+  try {
+    await api.emptyTrash();
+    set({ trash: [] });
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+function sortSessions(list: SessionOut[]): SessionOut[] {
+  const at = (s: SessionOut) => s.last_message_at ?? s.created_at;
+  return [...list].sort((a, b) => (at(a) < at(b) ? 1 : at(a) > at(b) ? -1 : 0));
+}
+
+// --- 그룹 ---
+
+export async function createGroup(name: string): Promise<GroupOut | null> {
+  if (!name.trim()) return null;
+  try {
+    const g = await api.createGroup(name.trim());
+    set((st) => ({ groups: [...st.groups, g] }));
+    return g;
+  } catch (e) {
+    notify(errorText(e), "warn");
+    return null;
+  }
+}
+
+export async function renameGroup(gid: string, name: string) {
+  if (!name.trim()) return;
+  try {
+    const g = await api.updateGroup(gid, { name: name.trim() });
+    set((st) => ({ groups: st.groups.map((x) => (x.id === gid ? g : x)) }));
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+/** 그룹만 지운다. 속한 세션은 그룹 없음이 된다 */
+export async function deleteGroup(gid: string) {
+  try {
+    await api.deleteGroup(gid);
+    set((st) => ({
+      groups: st.groups.filter((x) => x.id !== gid),
+      sessions: st.sessions.map((s) => (s.group_id === gid ? { ...s, group_id: null } : s)),
+      draft: st.draft.groupId === gid ? { ...st.draft, groupId: null } : st.draft,
+    }));
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
+}
+
+/** 이 그룹에 새 세션(첫 메시지 때 그룹에 들어간 채로 만들어진다) */
+export function newSessionIn(groupId: string | null) {
+  set((st) => ({ draft: { ...st.draft, groupId } }));
+  openSession(null);
 }
 
 function dropSession(sid: string) {
@@ -392,7 +520,8 @@ function dropSession(sid: string) {
 // --- 전송 ---
 
 export function modelOf(sid: string | null): Model | null {
-  return sid ? (get().models[sid] ?? null) : null;
+  if (!sid) return get().draft.model;
+  return get().sessions.find((s) => s.id === sid)?.model ?? null;
 }
 
 /** 사용자 메시지 전송. 성공하면 true(입력창을 비운다) */
@@ -406,9 +535,16 @@ export async function sendText(text: string): Promise<boolean> {
   if (!sid) {
     // 빈 세션은 첫 메시지 때 만든다. 제목은 첫 메시지 앞 20자
     try {
-      const s = await api.createSession(text.trim().replace(/\s+/g, " ").slice(0, TITLE_LEN));
+      const { model, groupId } = get().draft;
+      const title = text.trim().replace(/\s+/g, " ").slice(0, TITLE_LEN);
+      const s = await api.createSession(title, groupId, model);
       sid = s.id;
-      set((st) => ({ sessions: [s, ...st.sessions], chats: { ...st.chats, [s.id]: emptyChat() }, activeId: s.id }));
+      set((st) => ({
+        sessions: [s, ...st.sessions],
+        chats: { ...st.chats, [s.id]: emptyChat() },
+        activeId: s.id,
+        draft: { model: null, groupId: null },
+      }));
       writeHash(s.id);
       socket.send({ type: "subscribe", payload: { session_id: s.id, since_seq: 0 } });
     } catch (e) {
@@ -416,8 +552,8 @@ export async function sendText(text: string): Promise<boolean> {
       return false;
     }
   }
-  const model = modelOf(sid);
-  const ok = socket.send({ type: "send", session_id: sid, payload: model ? { text, model } : { text } });
+  // 모델은 허브가 세션에 저장된 값으로 정한다
+  const ok = socket.send({ type: "send", session_id: sid, payload: { text } });
   if (!ok) {
     notify("전송하지 못했습니다. 연결을 확인해 주세요.", "warn");
     return false;
@@ -434,15 +570,19 @@ export function cancelQueued(runId: string) {
   socket?.send({ type: "cancel_queued", payload: { run_id: runId } });
 }
 
-export function setModel(sid: string | null, model: Model) {
+/** 세션 모델 저장(허브). 새 세션이면 첫 메시지 때 함께 만든다. null 이면 기본 */
+export async function setModel(sid: string | null, model: Model | null) {
   if (!sid) {
-    notify("첫 메시지를 보낸 뒤에 모델을 바꿀 수 있습니다", "warn");
+    set((st) => ({ draft: { ...st.draft, model } }));
+    notify(`이 세션은 ${model ?? "기본"} 모델을 씁니다`);
     return;
   }
-  const models = { ...get().models, [sid]: model };
-  writeModels(models);
-  set({ models });
-  notify(`다음 실행부터 ${model} 모델을 씁니다`);
+  try {
+    replaceSession(await api.updateSession(sid, { model }));
+    notify(`다음 실행부터 ${model ?? "기본"} 모델을 씁니다`);
+  } catch (e) {
+    notify(errorText(e), "warn");
+  }
 }
 
 // 테스트용

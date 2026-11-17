@@ -32,6 +32,8 @@ final class WsClient {
     private DataInputStream in;
     private OutputStream out;
     private volatile boolean closed = false;
+    /** 서버가 보낸 close 코드(없으면 0). 4423 = 다른 휴대폰이 연결 중 */
+    volatile int closeCode = 0;
 
     /** 연결과 핸드셰이크. 실패하면 IOException. */
     void connect(URI uri, String bearerToken, int timeoutMs) throws IOException {
@@ -171,6 +173,7 @@ final class WsClient {
                     }
                     break;
                 case 0x8:
+                    if (data.length >= 2) closeCode = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
                     try { sendFrame(0x8, new byte[0]); } catch (IOException ignored) {}
                     close();
                     throw new IOException(String.format(Locale.US, "서버가 닫음%s",

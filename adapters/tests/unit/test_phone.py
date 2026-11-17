@@ -41,7 +41,9 @@ async def stack(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_VOOY_DIR", str(tmp_path / "fake"))
     monkeypatch.setenv("FAKE_VOOY_LATENCY", "0.3")
     port = _free_port()
-    gw = Gateway(HUB, DEV, ["com.vooy.mobile", "com.pickle.client", "com.facebook.aura", "ai.manus.agents"])
+    gw = Gateway(
+        HUB, DEV, ["com.vooy.mobile", "com.pickle.client", "com.facebook.aura", "ai.manus.agents"], state_dir=tmp_path / "gw"
+    )
     server = uvicorn.Server(uvicorn.Config(gw.app(), host="127.0.0.1", port=port, log_level="warning", ws="websockets-sansio"))
     srv_task = asyncio.create_task(server.serve())
     while not server.started:
@@ -113,6 +115,44 @@ async def test_preferred_phone_takes_over(stack, monkeypatch):
         await asyncio.wait_for(again.run_once(), 5)
     assert gw.link.device == "samsung ULTRA-25"
     task.cancel()
+
+
+async def test_prefer_phone_changed_at_runtime(stack, tmp_path):
+    """화면에서 우선 휴대폰을 바꾸면 지금 폰을 끊고, 우선 폰이 붙으면 자리를 넘긴다. 고른 값과 목록은 재시작 뒤에도 남는다."""
+    base, gw, phone = stack
+    ws_url = base.replace("http", "ws") + "/phone/ws"
+    # 거절된 폰도 목록에 남는다
+    other = FakePhone(ws_url, DEV, FakeVooyDevice())
+    other.device_name = "samsung NOTE-9"
+    with pytest.raises(Exception):
+        await asyncio.wait_for(other.run_once(), 5)
+    async with _client(base) as c:
+        d = (await c.get("/devices")).json()
+        assert d["current"] == "fake-phone" and d["prefer"] == ""
+        assert {r["device"] for r in d["devices"]} == {"fake-phone", "samsung NOTE-9"}
+        assert (await c.put("/prefer", json={"device": 3})).status_code == 400
+
+        first = gw.link
+        d = (await c.put("/prefer", json={"device": "samsung NOTE-9"})).json()
+        assert d["prefer"] == "samsung NOTE-9"
+        assert next(r for r in d["devices"] if r["device"] == "samsung NOTE-9")["preferred"] is True
+    # 지금 폰(fake-phone)은 끊긴다. 우선 폰이 없으니 다시 붙는다(먼저 붙은 폰을 지킨다)
+    for _ in range(100):
+        if gw.link is not None and gw.link is not first and gw.link.device == "fake-phone":
+            break
+        await asyncio.sleep(0.05)
+    assert gw.link is not first and gw.link.device == "fake-phone"
+    # 우선 폰이 붙으면 자리를 넘겨받는다
+    task = asyncio.create_task(other.run_once())
+    for _ in range(100):
+        if gw.link is not None and gw.link.device == "samsung NOTE-9":
+            break
+        await asyncio.sleep(0.05)
+    assert gw.link.device == "samsung NOTE-9"
+    task.cancel()
+    # 재시작 뒤에도 남는다
+    again = Gateway(HUB, DEV, [], state_dir=tmp_path / "gw")
+    assert again.prefer == "samsung NOTE-9" and "fake-phone" in again.known
 
 
 async def test_screen_commands_need_lease(stack):

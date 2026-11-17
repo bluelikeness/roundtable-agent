@@ -12,6 +12,8 @@
 - GET  /api/bots/<bot>/logs          최근 ask 기록
 - POST /api/sessions/<id>/restart    /restart: 다음 실행을 새 Claude 세션으로
 - GET  /api/claude/status            봇 상태 패널 하단 Claude Code 섹션
+- GET  /api/phone                    사용할 폰: 붙은 적 있는 휴대폰·우선 휴대폰·지금 붙은 폰
+- PUT  /api/phone/prefer             {device} 우선 휴대폰 바꾸기. 새 폰이 붙으면 봇 상태를 다시 확인한다
 - POST /internal/bot-status          어댑터 웹훅(X-Hub-Token). 웹(nginx)은 /internal 을 프록시하지 않는다
 """
 
@@ -236,6 +238,48 @@ async def claude_status(
     if ping is not None:
         runner_ok = await ping()
     return ClaudeStatusOut(runner_ok=runner_ok, runs_today=len(usages), tokens_today=sum(_tokens(u) for u in usages))
+
+
+# --- 사용할 폰 ---
+
+
+class PhoneRow(BaseModel):
+    device: str
+    android: str | None = None
+    sdk: int | None = None
+    version: str | None = None
+    last_seen_at: int | None = None
+    connected: bool = False
+    preferred: bool = False
+
+
+class PhoneOut(BaseModel):
+    prefer: str
+    current: str | None
+    devices: list[PhoneRow]
+
+
+class PhonePrefer(BaseModel):
+    device: str = Field(max_length=120)
+
+
+@router.get("/phone", response_model=PhoneOut)
+async def phone_devices(monitor: BotMonitor = Depends(monitor_of)) -> Any:
+    try:
+        return await monitor.phone("GET", "/devices")
+    except AdminError as e:
+        raise _http(e) from None
+
+
+@router.put("/phone/prefer", response_model=PhoneOut)
+async def phone_prefer(body: PhonePrefer, monitor: BotMonitor = Depends(monitor_of)) -> Any:
+    device = body.device.strip()
+    try:
+        out = await monitor.phone("PUT", "/prefer", json={"device": device})
+    except AdminError as e:
+        raise _http(e) from None
+    monitor.after_phone_switch(device)
+    return out
 
 
 # --- 어댑터 웹훅 ---

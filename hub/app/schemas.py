@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,13 +21,24 @@ class OperatorOut(BaseModel):
     username: str
 
 
+ModelName = Literal["sonnet", "opus"]
+
+
 class SessionCreate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
+    group_id: uuid.UUID | None = None
+    model: ModelName | None = None
 
 
 class SessionUpdate(BaseModel):
+    """보낸 필드만 바꾼다. group_id·model 은 null 로 보내면 그룹 없음·기본 모델로 되돌린다."""
+
     title: str | None = Field(default=None, max_length=200)
     archived: bool | None = None
+    group_id: uuid.UUID | None = None
+    model: ModelName | None = None
+    # true: 휴지통으로, false: 휴지통에서 되살리기
+    trashed: bool | None = None
 
 
 class SessionOut(BaseModel):
@@ -38,6 +49,27 @@ class SessionOut(BaseModel):
     created_at: datetime
     last_message_at: datetime | None
     archived: bool
+    group_id: uuid.UUID | None = None
+    model: str | None = None
+    trashed_at: datetime | None = None
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class GroupUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    position: int | None = None
+
+
+class GroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    position: int
+    created_at: datetime
 
 
 class MessageOut(BaseModel):
