@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # 입구 남용 방지: 분당 받는 건수와 글 길이 상한
     inbox_per_minute: int = 10
     inbox_max_chars: int = 4000
+    # POST 가 실행 끝을 기다리는 최대 초. 넘으면 202 와 결과 주소(GET)를 돌려준다
+    inbox_wait_s: float = 15
 
     def read_adapter_token(self) -> str:
         if self.adapter_token:
