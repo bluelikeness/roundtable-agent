@@ -9,6 +9,8 @@
   POST /lease/{id}/renew, DELETE /lease/{id}
   GET  /events?after=&pkg=&wait_s=   알림 이벤트 롱폴링
   POST /apk/link                한 번만 쓰는 APK 다운로드 경로를 만든다(QR 설치용, 30분)
+  GET  /devices                 붙은 적 있는 휴대폰 목록과 우선 휴대폰(허브 봇 상태 패널 "사용할 폰")
+  PUT  /prefer                  {device} 우선 휴대폰을 바꾼다. 지금 붙은 폰이 아니면 끊어 자리를 넘긴다. "" 면 먼저 붙은 폰
 
   워커 앱 배포(공개 경로, Caddy·nginx 가 /phone/ 아래만 넘긴다)
   GET  /phone/apk/latest.json   최신 버전 정보. 기기 토큰(Bearer)
@@ -205,6 +207,7 @@ class Gateway:
         watch_pkgs: list[str],
         apk_dir: str | Path | None = None,
         screen_off_after_s: float = 0,
+        state_dir: str | Path | None = None,
     ):
         if not device_token:
             raise ValueError("기기 토큰 없이 기동하지 않습니다(PHONE_DEVICE_TOKEN)")
@@ -222,6 +225,12 @@ class Gateway:
         self.screen_off_after_s = screen_off_after_s
         self._woke_by_us = False
         self._off_task: asyncio.Task | None = None
+        # 우선 휴대폰·붙은 적 있는 휴대폰. state_dir 이 있으면 파일에 남겨 재시작 뒤에도 쓴다.
+        # 화면에서 고른 적이 없으면(None) PHONE_PREFER_DEVICE 를 쓴다
+        self._state_file = Path(state_dir) / "phones.json" if state_dir else None
+        self._prefer: str | None = None
+        self.known: dict[str, dict[str, Any]] = {}
+        self._load_state()
 
     # --- 휴대폰 WebSocket -------------------------------------------------
 
@@ -248,8 +257,9 @@ class Gateway:
             sdk=int(sdk) if isinstance(sdk, int) else None,
             android=str(hello["android"]) if hello.get("android") else None,
         )
+        self._remember(link)
         old = self.link
-        prefer = read_prefer_device()
+        prefer = self.prefer
         # 우선 휴대폰(PHONE_PREFER_DEVICE)이 들어오면 붙어 있던 다른 휴대폰을 끊고 자리를 넘긴다.
         # 끊긴 쪽은 다시 붙으려 해도 아래 규칙(살아 있는 쪽을 지킨다)으로 거절된다
         takes_over = bool(prefer) and prefer in link.device and (old is None or prefer not in old.device)
@@ -329,6 +339,80 @@ class Gateway:
                     await link.ws.close(code=4408)
                 except Exception:  # noqa: BLE001
                     pass
+
+    # --- 우선 휴대폰 -------------------------------------------------------
+
+    @property
+    def prefer(self) -> str:
+        return read_prefer_device() if self._prefer is None else self._prefer
+
+    def _load_state(self) -> None:
+        if self._state_file is None or not self._state_file.is_file():
+            return
+        try:
+            data = json.loads(self._state_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            log.warning("휴대폰 상태 파일을 읽지 못함(무시): %s", e)
+            return
+        if isinstance(data.get("prefer"), str):
+            self._prefer = data["prefer"]
+        if isinstance(data.get("devices"), dict):
+            self.known = {str(k): dict(v) for k, v in data["devices"].items() if isinstance(v, dict)}
+
+    def _save_state(self) -> None:
+        if self._state_file is None:
+            return
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._state_file.with_suffix(".tmp")
+            body = {"prefer": self._prefer, "devices": self.known}
+            tmp.write_text(json.dumps(body, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(self._state_file)
+        except OSError as e:
+            log.warning("휴대폰 상태 파일을 쓰지 못함: %s", e)
+
+    def _remember(self, link: PhoneLink) -> None:
+        """붙으려 한 휴대폰을 목록에 남긴다(거절된 폰도 고를 수 있게)."""
+        self.known[link.device] = {
+            "android": link.android,
+            "sdk": link.sdk,
+            "version": link.version,
+            "last_seen_at": int(time.time()),
+        }
+        self._save_state()
+
+    async def devices(self, request: Request) -> JSONResponse:
+        link = self.link
+        current = link.device if link is not None and not link.closed else None
+        prefer = self.prefer
+        rows = [
+            {"device": name, **info, "connected": name == current, "preferred": bool(prefer) and prefer in name}
+            for name, info in sorted(self.known.items(), key=lambda kv: -int(kv[1].get("last_seen_at") or 0))
+        ]
+        return JSONResponse({"prefer": prefer, "current": current, "devices": rows})
+
+    async def set_prefer(self, request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        device = body.get("device") if isinstance(body, dict) else None
+        if not isinstance(device, str) or len(device) > 120:
+            return JSONResponse({"error": "device 는 문자열"}, status_code=400)
+        device = device.strip()
+        self._prefer = device
+        self._save_state()
+        link = self.link
+        if device and link is not None and not link.closed and device not in link.device:
+            # 지금 폰을 끊는다. 우선 폰이 붙어 있지 않으면 지금 폰이 곧 다시 붙고(먼저 붙은 폰을 지킨다),
+            # 우선 폰이 붙으면 그때 자리를 넘겨받는다
+            log.warning("우선 휴대폰을 %s 로 바꿈 → %s 연결을 끊음", device, link.device)
+            link.fail_all("우선 휴대폰 변경")
+            with contextlib.suppress(Exception):
+                await link.ws.close(code=4410, reason="preferred phone changed")
+        else:
+            log.info("우선 휴대폰: %s", device or "(없음: 먼저 붙은 폰)")
+        return await self.devices(request)
 
     # --- 내부 API ---------------------------------------------------------
 
@@ -511,6 +595,8 @@ class Gateway:
                 Route("/lease/{lease}/renew", self.lease_renew, methods=["POST"]),
                 Route("/lease/{lease}", self.lease_release, methods=["DELETE"]),
                 Route("/events", self.events_poll),
+                Route("/devices", self.devices),
+                Route("/prefer", self.set_prefer, methods=["PUT"]),
             ],
             lifespan=lifespan,
         )
@@ -530,6 +616,11 @@ class Gateway:
 def read_prefer_device() -> str:
     """우선 휴대폰. 기기 이름(hello.device)의 일부, 예: "SM-S938N". 비면 먼저 붙은 휴대폰을 지킨다."""
     return os.environ.get("PHONE_PREFER_DEVICE", "").strip()
+
+
+def state_dir_from_env() -> str | None:
+    """PHONE_STATE_DIR: 우선 휴대폰·휴대폰 목록을 남길 폴더(볼륨). 비면 메모리에만 둔다."""
+    return os.environ.get("PHONE_STATE_DIR") or None
 
 
 def read_device_token() -> str:

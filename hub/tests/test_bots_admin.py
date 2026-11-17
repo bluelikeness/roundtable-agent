@@ -40,6 +40,8 @@ class FakeAdapter:
         if request.headers.get("x-hub-token") != TOKEN:
             return httpx.Response(401)
         path = request.url.path
+        if request.url.host == "phone-gateway":
+            return self.gateway(request)
         match (request.method, path):
             case ("GET", "/health") | ("POST", "/probe"):
                 return httpx.Response(200, json=self.health)
@@ -66,6 +68,24 @@ class FakeAdapter:
         return httpx.Response(404, json={"detail": "not found"})
 
 
+    # 폰 게이트웨이 대역(GET /devices, PUT /prefer, GET /state)
+    prefer = ""
+
+    def gateway(self, request: httpx.Request) -> httpx.Response:
+        rows = [{"device": d, "connected": d == "samsung SM-S938N", "preferred": bool(self.prefer) and self.prefer in d}
+                for d in ("samsung SM-S938N", "samsung SM-N960N")]
+        out = {"prefer": self.prefer, "current": "samsung SM-S938N", "devices": rows}
+        match (request.method, request.url.path):
+            case ("GET", "/devices"):
+                return httpx.Response(200, json=out)
+            case ("PUT", "/prefer"):
+                self.prefer = json.loads(request.content)["device"]
+                return httpx.Response(200, json={**out, "prefer": self.prefer})
+            case ("GET", "/state"):
+                return httpx.Response(200, json={"connected": True, "device": self.prefer or "samsung SM-S938N"})
+        return httpx.Response(404)
+
+
 @pytest.fixture
 def settings(tmp_path):
     f = tmp_path / "bots.yaml"
@@ -75,7 +95,17 @@ def settings(tmp_path):
         "  - {name: mock-b, mcp_url: 'http://mock-b:9000/mcp'}\n",
         encoding="utf-8",
     )
-    s = get_settings().model_copy(update={"bots_file": str(f), "adapter_token": TOKEN, "health_interval_s": 0})
+    s = get_settings().model_copy(
+        update={
+            "bots_file": str(f),
+            "adapter_token": TOKEN,
+            "health_interval_s": 0,
+            "phone_gateway_url": "http://phone-gateway:9200",
+            "phone_switch_wait_s": 5,
+            "phone_switch_recheck_s": 5,
+            "phone_switch_recheck_every_s": 0.05,
+        }
+    )
     app.dependency_overrides[get_settings] = lambda: s
     yield s
     app.dependency_overrides.pop(get_settings, None)
@@ -275,3 +305,46 @@ async def test_start_loads_last_status_from_db(settings, db):
         await m.aclose()
     rows = (await db.execute(select(Bot.name))).scalars().all()
     assert set(rows) == {"mock-a", "gone"}
+
+
+async def test_phone_prefer_switch_probes_bots(authed, adapter):
+    """사용할 폰: 목록을 보여 주고, 바꾸면 게이트웨이에 넘긴 뒤 새 폰이 붙으면 봇 상태를 다시 확인한다."""
+    r = await authed.get("/api/phone")
+    assert r.status_code == 200 and r.json()["current"] == "samsung SM-S938N"
+    assert len(r.json()["devices"]) == 2
+    assert (await authed.put("/api/phone/prefer", json={"device": "x" * 121})).status_code == 422
+
+    r = await authed.put("/api/phone/prefer", json={"device": " samsung SM-N960N "})
+    assert r.status_code == 200 and r.json()["prefer"] == "samsung SM-N960N"
+    put = next(q for q in adapter.requests if q.url.path == "/prefer")
+    assert json.loads(put.content) == {"device": "samsung SM-N960N"} and put.headers["x-hub-token"] == TOKEN
+    await adapter.monitor._switch
+    assert any(q.url.path == "/probe" and q.url.host == "mock-a" for q in adapter.requests)
+
+
+async def test_phone_gateway_off_or_down(authed, adapter, settings):
+    adapter.down = True
+    assert (await authed.get("/api/phone")).json()["detail"] == "phone_gateway_unreachable"
+    settings.phone_gateway_url = ""
+    assert (await authed.get("/api/phone")).status_code == 404
+
+
+async def test_phone_switch_rechecks_until_unlocked(authed, adapter):
+    """바꾼 폰이 잠겨 있어 첫 확인이 실패해도, 잠금이 풀리면 다음 5분 주기를 기다리지 않고 곧 다시 쓸 수 있다."""
+    adapter.health = {**adapter.health, "available": False, "reason": "backend_down"}
+    probes = 0
+    orig = adapter.handler
+
+    def unlock_after_two(request):
+        nonlocal probes
+        if request.url.path == "/probe":
+            probes += 1
+            if probes >= 3:
+                adapter.health = {**adapter.health, "available": True, "reason": None}
+        return orig(request)
+
+    adapter.monitor._client._transport = httpx.MockTransport(unlock_after_two)
+    assert (await authed.put("/api/phone/prefer", json={"device": "samsung SM-N960N"})).status_code == 200
+    await adapter.monitor._switch
+    assert probes == 3
+    assert adapter.monitor.statuses["mock-a"].available is True

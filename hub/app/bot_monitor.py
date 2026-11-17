@@ -71,6 +71,7 @@ class BotMonitor:
         )
         self.statuses: dict[str, BotStatusPayload] = {}
         self._task: asyncio.Task | None = None
+        self._switch: asyncio.Task | None = None
 
     # --- 기동·종료 ---
 
@@ -85,6 +86,8 @@ class BotMonitor:
             self._task = asyncio.create_task(self._loop(), name="bot-monitor")
 
     async def aclose(self) -> None:
+        if self._switch is not None:
+            self._switch.cancel()
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -145,6 +148,56 @@ class BotMonitor:
             return r.json()
         except ValueError:
             raise AdminError(502, "adapter_bad_response") from None
+
+    # --- 휴대폰(폰 게이트웨이) ---
+
+    async def phone(self, method: str, path: str, json: Any = None) -> Any:
+        """폰 게이트웨이 내부 API. 주소가 없으면 404, 닿지 않으면 502."""
+        base = self.settings.phone_gateway_url.rstrip("/")
+        if not base:
+            raise AdminError(404, "phone_gateway_off")
+        try:
+            r = await self._client.request(method, base + path, json=json)
+        except httpx.HTTPError as e:
+            log.info("폰 게이트웨이 %s %s 실패: %s", method, path, type(e).__name__)
+            raise AdminError(502, "phone_gateway_unreachable") from None
+        if r.status_code == 400:
+            raise AdminError(422, "bad_device")
+        if r.status_code >= 300:
+            raise AdminError(502, "phone_gateway_error")
+        return r.json()
+
+    def after_phone_switch(self, prefer: str) -> None:
+        """우선 휴대폰을 바꾼 뒤: 새 폰이 붙기를 기다렸다가 봇 상태를 다시 확인한다.
+        휴대폰이 바뀌는 동안 실패한 봇이 backend_down 에 머물지 않게 한다."""
+        if self._switch is not None and not self._switch.done():
+            self._switch.cancel()
+        self._switch = asyncio.create_task(self._wait_phone_then_probe(prefer), name="phone-switch")
+
+    async def _wait_phone_then_probe(self, prefer: str) -> None:
+        loop = asyncio.get_running_loop()
+        end = loop.time() + self.settings.phone_switch_wait_s
+        while loop.time() < end:
+            await asyncio.sleep(2)
+            try:
+                st = await self.phone("GET", "/state")
+            except AdminError:
+                continue
+            dev = st.get("device") or ""
+            if st.get("connected") and (not prefer or prefer in dev):
+                break
+        else:
+            log.warning("우선 휴대폰 %s 가 %s초 안에 붙지 않음", prefer, self.settings.phone_switch_wait_s)
+        bots = [b.name for b in self.bots() if b.admin_url]
+        await asyncio.gather(*(self.refresh(n, probe=True) for n in bots), return_exceptions=True)
+        # 잠긴 폰은 사람이 풀 때까지 실패한다. 풀리면 곧 쓸 수 있게 한동안 실패한 봇만 다시 확인한다
+        end = loop.time() + self.settings.phone_switch_recheck_s
+        while loop.time() < end:
+            down = [n for n in bots if (st := self.statuses.get(n)) is not None and not st.available and st.reason == "backend_down"]
+            if not down:
+                return
+            await asyncio.sleep(self.settings.phone_switch_recheck_every_s)
+            await asyncio.gather(*(self.refresh(n, probe=True) for n in down), return_exceptions=True)
 
     # --- 상태 ---
 

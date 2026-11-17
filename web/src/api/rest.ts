@@ -1,5 +1,5 @@
 // 허브 REST fetch 래퍼. 인증은 HttpOnly 쿠키라 credentials 만 맞추면 된다.
-import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, LoginSubmitResult, MessageOut, SessionOut, GroupOut, ModelName } from "./types";
+import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, PhoneOut, LoginSubmitResult, MessageOut, SessionOut, GroupOut, ModelName } from "./types";
 
 export class HttpError extends Error {
   constructor(
@@ -78,6 +78,8 @@ export const api = {
   botLogs: (bot: string) => request<BotLogEntry[]>("GET", `/api/bots/${enc(bot)}/logs`),
   restartSession: (id: string) => request<{ ok: boolean; had_session: boolean }>("POST", `/api/sessions/${id}/restart`),
   claudeStatus: () => request<ClaudeStatus>("GET", "/api/claude/status"),
+  phone: () => request<PhoneOut>("GET", "/api/phone"),
+  setPhone: (device: string) => request<PhoneOut>("PUT", "/api/phone/prefer", { device }),
 };
 
 const enc = encodeURIComponent;
