@@ -138,4 +138,4 @@ rules used in this repo.
 
 ## License
 
-No license has been chosen yet; all rights reserved by the author.
+[MIT](LICENSE). This covers the whole repository, including the Android worker app in `phone/`.
