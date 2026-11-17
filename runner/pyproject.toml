@@ -1,7 +1,7 @@
 [project]
-name = "multibot-runner"
+name = "roundtable-runner"
 version = "0.1.0"
-description = "멀티봇 Claude Code 러너"
+description = "Roundtable-Agent Claude Code 러너"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "starlette>=0.40",

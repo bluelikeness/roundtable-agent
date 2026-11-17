@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
         await dispose_engine()
 
 
-app = FastAPI(title="multibot hub", lifespan=lifespan)
+app = FastAPI(title="Roundtable-Agent hub", lifespan=lifespan)
 app.include_router(router)
 app.include_router(ws_router)
 app.include_router(bots_router)

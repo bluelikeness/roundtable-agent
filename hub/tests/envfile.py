@@ -36,9 +36,9 @@ def parse_env(text: str) -> dict[str, str]:
 
 def build_test_db_url(env_path: Path) -> str:
     env = parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
-    user = env.get("POSTGRES_USER", "multibot")
+    user = env.get("POSTGRES_USER", "roundtable")
     password = env.get("POSTGRES_PASSWORD")
     if not password:
         raise RuntimeError(f"{env_path} 에 POSTGRES_PASSWORD 가 없습니다 (.env.example 참고)")
     # 비밀번호의 @ : / 같은 문자가 URL 을 깨지 않도록 인코딩한다
-    return f"postgresql+asyncpg://{quote(user, safe='')}:{quote(password, safe='')}@localhost:5433/multibot_test"
+    return f"postgresql+asyncpg://{quote(user, safe='')}:{quote(password, safe='')}@localhost:5433/roundtable_test"

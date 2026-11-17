@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -12,7 +12,7 @@ import android.os.Build;
 import android.os.IBinder;
 
 /**
- * 포그라운드 서비스("멀티봇 워커 연결 중" 알림). 연결 자체는 접근성 서비스(Worker)가 들고 있고, 이 서비스는
+ * 포그라운드 서비스("Roundtable-Agent 워커 연결 중" 알림). 연결 자체는 접근성 서비스(Worker)가 들고 있고, 이 서비스는
  * 프로세스를 포그라운드로 올려 두는 역할만 한다. 백그라운드 앱은 삼성 등에서 연결된 지 몇 초 만에 네트워크가
  * 끊긴다(2026-11-11 실기기: SocketException "Software caused connection abort").
  */
@@ -35,7 +35,7 @@ public class KeepAlive extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel ch = new NotificationChannel(CHANNEL, "멀티봇 워커 연결", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel ch = new NotificationChannel(CHANNEL, "Roundtable-Agent 워커 연결", NotificationManager.IMPORTANCE_LOW);
             ch.setShowBadge(false);
             nm.createNotificationChannel(ch);
         }
@@ -43,7 +43,7 @@ public class KeepAlive extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         Notification n = b.setSmallIcon(android.R.drawable.ic_menu_share)
-                .setContentTitle("멀티봇 워커")
+                .setContentTitle("Roundtable-Agent 워커")
                 .setContentText("허브와 연결을 유지하는 중")
                 .setOngoing(true)
                 .setContentIntent(open)

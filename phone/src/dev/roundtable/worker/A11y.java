@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;

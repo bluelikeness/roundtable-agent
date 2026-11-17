@@ -1,7 +1,7 @@
 [project]
-name = "multibot-adapters"
+name = "roundtable-adapters"
 version = "0.1.0"
-description = "멀티봇 어댑터 베이스, Mock·Vooy 어댑터"
+description = "Roundtable-Agent 어댑터 베이스, Mock·Vooy 어댑터"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "mcp>=1.20",

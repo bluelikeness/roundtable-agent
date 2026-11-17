@@ -61,7 +61,7 @@ T14는 줄 수 외에도 확인할 점이 있었다. 초안대로면 요약으�
 
 ## 평가 구조
 
-- `runner/eval/compose.yml`: 별도 compose 프로젝트 `multibot-eval`이다. 러너 2개(기본, 토론 상한 5)와 Mock 8개를 띄운다. 포트는 열지 않는다. 로그인은 운영 볼륨 `multibot_runner-claude`를 빌리고, 대화 파일(`projects/`)은 tmpfs라 운영 볼륨에 남지 않는다. `orchestrator.md`는 작업 트리 파일을 마운트한다.
+- `runner/eval/compose.yml`: 별도 compose 프로젝트 `roundtable-eval`이다. 러너 2개(기본, 토론 상한 5)와 Mock 8개를 띄운다. 포트는 열지 않는다. 로그인은 운영 볼륨 `roundtable_runner-claude`를 빌리고, 대화 파일(`projects/`)은 tmpfs라 운영 볼륨에 남지 않는다. `orchestrator.md`는 작업 트리 파일을 마운트한다.
 - 드라이버는 러너 `POST /runs`를 직접 부른다(허브·DB 없음). NDJSON의 `tool_call` 시작·결과 순서로 병렬·순차를 판정하고, `claude.note`·`claude.final`로 형식을 판정한다.
 - 원본 NDJSON과 리포트는 `runner/eval/out/`에 남는다(커밋 안 함).
 

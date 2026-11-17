@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.app.Activity;
 import android.content.ComponentName;
@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
         col.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("멀티봇 워커");
+        title.setText("Roundtable-Agent 워커");
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         col.addView(title);
@@ -46,7 +46,7 @@ public class MainActivity extends Activity {
         col.addView(button("앱 정보 열기 (⋮ → 제한된 설정 허용)", v -> startActivity(
                 new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())))));
         col.addView(button("알림 접근 설정 열기", v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))));
-        col.addView(button("접근성 설정 열기 → 멀티봇 워커 켜기", v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));
+        col.addView(button("접근성 설정 열기 → Roundtable-Agent 워커 켜기", v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));
         col.addView(button("배터리 최적화 예외 (연결 끊김 방지)", v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));

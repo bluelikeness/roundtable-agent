@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -74,7 +74,7 @@ final class WsClient {
                 + "Sec-WebSocket-Key: " + key + "\r\n"
                 + "Sec-WebSocket-Version: 13\r\n"
                 + "Authorization: Bearer " + bearerToken + "\r\n"
-                + "User-Agent: multibot-worker\r\n"
+                + "User-Agent: roundtable-worker\r\n"
                 + "\r\n";
         out.write(req.getBytes(StandardCharsets.UTF_8));
         out.flush();

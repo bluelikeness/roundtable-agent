@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.os.Handler;
 import android.os.Looper;
@@ -22,7 +22,7 @@ final class WLog {
 
     static void add(String msg) {
         String line = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + " " + msg;
-        android.util.Log.i("MultibotWorker", line);
+        android.util.Log.i("RoundtableWorker", line);
         synchronized (lines) {
             lines.addLast(line);
             while (lines.size() > 300) lines.removeFirst();

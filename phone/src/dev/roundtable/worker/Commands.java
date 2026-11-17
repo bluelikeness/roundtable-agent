@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -55,7 +55,7 @@ final class Commands {
     private synchronized void keepAwake() {
         PowerManager pm = (PowerManager) svc.getSystemService(Context.POWER_SERVICE);
         if (awake == null) {
-            awake = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "multibot:busy");
+            awake = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "roundtable:busy");
             awake.setReferenceCounted(false);
         }
         awake.acquire(AWAKE_MS);
@@ -382,7 +382,7 @@ final class Commands {
         CountDownLatch set = new CountDownLatch(1);
         // 클립보드는 메인 스레드에서 다룬다
         svc.runOnMain(() -> {
-            try { cm.setPrimaryClip(ClipData.newPlainText("multibot", text)); } catch (Exception e) { err.set(e); }
+            try { cm.setPrimaryClip(ClipData.newPlainText("roundtable", text)); } catch (Exception e) { err.set(e); }
             set.countDown();
         });
         set.await(2, TimeUnit.SECONDS);
@@ -419,7 +419,7 @@ final class Commands {
             woke = true;
             // 화면 켜기: ACQUIRE_CAUSES_WAKEUP 잠금(옛 방식, 대부분의 기기) + 잠금화면 위 투명 화면(새 방식)
             PowerManager.WakeLock w = pm.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "multibot:wake");
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "roundtable:wake");
             w.acquire(3000);
             svc.runOnMain(() -> {
                 try { WakeActivity.start(svc); } catch (Exception e) { WLog.add("깨우기 화면 실패: " + e.getClass().getSimpleName()); }
