@@ -1,6 +1,6 @@
-# 멀티봇 허브 (VM 1).
+# Roundtable-Agent (VM 1).
 # 로컬 개발용 포트 노출은 docker-compose.override.yml 에 있다.
-name: multibot
+name: roundtable
 
 # Mock 어댑터 공통 정의 (docs/03-adapters.md 10장). 이름만 바꿔 여러 개 띄운다.
 x-mock-adapter: &mock-adapter
@@ -20,9 +20,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-multibot}
+      POSTGRES_USER: ${POSTGRES_USER:-roundtable}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env 에 POSTGRES_PASSWORD 가 필요합니다}
-      POSTGRES_DB: ${POSTGRES_DB:-multibot}
+      POSTGRES_DB: ${POSTGRES_DB:-roundtable}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -36,7 +36,7 @@ services:
   hub-api:
     build: ./hub
     environment:
-      HUB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-multibot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-multibot}
+      HUB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-roundtable}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-roundtable}
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?.env 에 HUB_SECRET_KEY 가 필요합니다}
       HUB_COOKIE_SECURE: ${HUB_COOKIE_SECURE:-true}
       HUB_RUNNER_URL: http://runner:8700

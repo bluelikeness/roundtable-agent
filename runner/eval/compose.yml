@@ -1,8 +1,8 @@
-# 평가(make eval) 전용 스택. 운영 스택(compose 프로젝트 multibot)과 섞이지 않게 별도 프로젝트로 띄운다.
-#   docker compose -p multibot-eval -f runner/eval/compose.yml ...
+# 평가(make eval) 전용 스택. 운영 스택(compose 프로젝트 roundtable)과 섞이지 않게 별도 프로젝트로 띄운다.
+#   docker compose -p roundtable-eval -f runner/eval/compose.yml ...
 # - 포트를 열지 않는다. 드라이버(eval)가 같은 내부망에서 러너를 부른다
 # - 토큰은 평가 때마다 만드는 임시 값(runner/eval/out/token, 커밋 안 함). 실제 봇 자격증명 아님
-# - Claude Code 로그인은 운영 러너 볼륨(multibot_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
+# - Claude Code 로그인은 운영 러너 볼륨(roundtable_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
 #   tmpfs 라 평가 대화가 운영 볼륨에 남지 않는다
 # - orchestrator.md 는 작업 트리 파일을 마운트한다: 프롬프트를 고치고 다시 돌릴 때 재빌드가 필요 없다
 
@@ -98,4 +98,4 @@ secrets:
 volumes:
   runner-claude:
     external: true
-    name: multibot_runner-claude
+    name: roundtable_runner-claude

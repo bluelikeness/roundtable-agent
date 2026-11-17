@@ -20,7 +20,7 @@ from app.auth import hash_password, new_totp_secret
 from app.db import dispose_engine, get_sessionmaker
 from app.models import Operator
 
-ISSUER = "multibot-hub"
+ISSUER = "roundtable-hub"
 
 
 def _read_password(from_stdin: bool) -> str:

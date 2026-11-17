@@ -49,12 +49,14 @@ export interface AppState {
   models: Record<string, Model>;
 }
 
-const MODEL_KEY = "multibot.models";
+const MODEL_KEY = "roundtable.models";
+// 이름을 바꾸기 전(multibot)에 저장한 모델 선택도 읽는다
+const OLD_MODEL_KEY = "multibot.models";
 const TITLE_LEN = 20;
 
 function readModels(): Record<string, Model> {
   try {
-    return JSON.parse(localStorage.getItem(MODEL_KEY) ?? "{}");
+    return JSON.parse(localStorage.getItem(MODEL_KEY) ?? localStorage.getItem(OLD_MODEL_KEY) ?? "{}");
   } catch {
     return {};
   }

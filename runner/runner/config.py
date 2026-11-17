@@ -17,7 +17,7 @@ class RunnerSettings(BaseSettings):
     # --resume 은 이 경로 기준으로 세션 파일을 찾으므로 실행마다 바꾸지 않는다.
     work_dir: Path = Path("/srv/runner/work")
     # 실행별 mcp.json·시스템 프롬프트를 두는 곳. 실행이 끝나면 지운다
-    runs_dir: Path = Path("/tmp/multibot-runs")
+    runs_dir: Path = Path("/tmp/roundtable-runs")
     # 오케스트레이터 시스템 프롬프트 템플릿(docs/04-orchestrator.md 8장)
     prompt_file: Path = PKG_DIR.parent / "orchestrator.md"
     # Claude Code --max-turns. 0 이면 넘기지 않는다(상한 없음, 2026-11-16 결정: 턴 수로 끊지 않고

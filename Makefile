@@ -1,4 +1,4 @@
-# 멀티봇 허브 개발 명령. 비밀값은 .env 에 둔다(커밋 금지, .env.example 참고).
+# Roundtable-Agent 개발 명령. 비밀값은 .env 에 둔다(커밋 금지, .env.example 참고).
 # .env 는 make 로 읽지 않는다: make 는 #·$·따옴표를 compose 와 다르게 해석한다.
 # 테스트는 hub/tests/envfile.py 가 compose 규칙으로 .env 를 읽는다.
 
@@ -7,10 +7,10 @@ COMPOSE := docker compose
 COMPOSE_CONTRACT := $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml -f adapters/tests/contract/compose.yml
 JSON2TS := pnpm dlx json-schema-to-typescript@15.0.4
 # 평가 전용 스택(운영 스택과 다른 compose 프로젝트). runner/eval/compose.yml 참고
-COMPOSE_EVAL := $(COMPOSE) -p multibot-eval -f runner/eval/compose.yml
+COMPOSE_EVAL := $(COMPOSE) -p roundtable-eval -f runner/eval/compose.yml
 EVAL_TOKEN := runner/eval/out/token
 # UI E2E 전용 스택(운영·평가와 다른 compose 프로젝트). e2e/compose.yml 참고
-COMPOSE_E2E := $(COMPOSE) -p multibot-e2e --env-file e2e/out/env -f e2e/compose.yml
+COMPOSE_E2E := $(COMPOSE) -p roundtable-e2e --env-file e2e/out/env -f e2e/compose.yml
 RAND_HEX = head -c $(1) /dev/urandom | od -An -tx1 | tr -d ' \n'
 
 .PHONY: up down logs ps test test-hub test-runner test-adapters test-web eval e2e types admin runner-login
@@ -29,7 +29,7 @@ ps:
 
 test: test-hub test-runner test-adapters test-web  ## hub·runner·adapters·web 전부
 
-test-hub:  ## 허브 단위 테스트. 로컬 postgres(5433)의 multibot_test DB 를 쓴다(.env 의 계정)
+test-hub:  ## 허브 단위 테스트. 로컬 postgres(5433)의 roundtable_test DB 를 쓴다(.env 의 계정)
 	$(COMPOSE) up -d --wait postgres
 	cd hub && uv run pytest -q
 	@echo "hub tests done"

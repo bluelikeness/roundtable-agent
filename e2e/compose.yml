@@ -1,14 +1,14 @@
-# UI E2E(make e2e) 전용 스택. 운영 스택(multibot)·평가 스택(multibot-eval)과 섞이지 않게 별도 프로젝트로 띄운다.
-#   docker compose -p multibot-e2e --env-file e2e/out/env -f e2e/compose.yml ...
+# UI E2E(make e2e) 전용 스택. 운영 스택(roundtable)·평가 스택(roundtable-eval)과 섞이지 않게 별도 프로젝트로 띄운다.
+#   docker compose -p roundtable-e2e --env-file e2e/out/env -f e2e/compose.yml ...
 # - 허브·DB·웹·러너·Mock 전부 새로 띄운다. DB 는 tmpfs 라 테스트 운영자와 대화가 끝나면 사라진다
 # - 비밀값(DB 비밀번호, 쿠키 키, 어댑터 토큰)은 make e2e 가 실행마다 만드는 임시 값(e2e/out, 커밋 안 함)
-# - Claude Code 로그인은 운영 러너 볼륨(multibot_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
+# - Claude Code 로그인은 운영 러너 볼륨(roundtable_runner-claude)을 빌려 쓴다. 대화 파일(projects/)은
 #   tmpfs 라 E2E 대화가 운영 볼륨에 남지 않는다(평가 스택과 같은 방식)
 # - Mock 설정은 평가와 같은 고정 시나리오(runner/eval/mocks)를 쓴다. 기본 Mock 의 무작위 실패·되물음은 끈 것
 # - 허브 bots.yaml 은 e2e/out/bots/bots.yaml 이다. 테스트가 시나리오마다 e2e/bots/*.yaml 을 복사해 넣고,
 #   허브는 실행마다·헬스체크마다 다시 읽는다(봇 이름은 그대로, mcp_url 만 변형 Mock 으로 바뀐다)
 # - 웹만 127.0.0.1:8090 으로 연다(Playwright 가 붙는 곳)
-name: multibot-e2e
+name: roundtable-e2e
 
 x-mock: &mock
   build:
@@ -27,12 +27,12 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: multibot
+      POSTGRES_USER: roundtable
       POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD:?make e2e 가 e2e/out/env 를 만든다}
-      POSTGRES_DB: multibot
+      POSTGRES_DB: roundtable
     tmpfs: [/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U multibot -d multibot"]
+      test: ["CMD-SHELL", "pg_isready -U roundtable -d roundtable"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -40,7 +40,7 @@ services:
   hub-api:
     build: ../hub
     environment:
-      HUB_DATABASE_URL: postgresql+asyncpg://multibot:${E2E_POSTGRES_PASSWORD}@postgres:5432/multibot
+      HUB_DATABASE_URL: postgresql+asyncpg://roundtable:${E2E_POSTGRES_PASSWORD}@postgres:5432/roundtable
       HUB_SECRET_KEY: ${E2E_HUB_SECRET_KEY:?make e2e 가 e2e/out/env 를 만든다}
       HUB_COOKIE_SECURE: "false"
       HUB_RUNNER_URL: http://runner:8700
@@ -114,4 +114,4 @@ secrets:
 volumes:
   runner-claude:
     external: true
-    name: multibot_runner-claude
+    name: roundtable_runner-claude

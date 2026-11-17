@@ -1,4 +1,4 @@
-# 멀티봇 로드맵과 클로드 코드 핸드오프
+# Roundtable-Agent 로드맵과 클로드 코드 핸드오프
 
 > **현재 단계: P2** (단계가 바뀌면 사람이 이 줄만 고친다)
 
@@ -46,7 +46,7 @@ P2 이후는 독립적이라 병렬로 가도 된다. 단, 클로드 코드 세�
 모노레포 하나. 서비스별 디렉터리에 Dockerfile을 두고 루트 compose가 묶는다.
 
 ```
-multibot/
+roundtable-agent/
   CLAUDE.md                 # 4장
   docs/                     # 설계 문서 export(markdown), 클로드 코드가 읽는 사본
     01-requirements.md  02-architecture.md  03-adapters.md
@@ -83,7 +83,7 @@ multibot/
 레포 루트에 둔다. 클로드 코드가 매 세션 읽는 유일한 상시 지시다. 짧게 유지하고 상세는 `docs/`로 보낸다.
 
 ```markdown
-# 멀티봇 허브
+# Roundtable-Agent
 
 여러 AI 비서 앱(Vooy·뮤즈·피클)을 한 웹 화면에서 Claude Code(헤드리스)가 오케스트레이션하는 개인용 허브.
 사용자 1명. 설계 문서는 docs/ 에 있고, 이 문서가 설계와 충돌하면 설계가 맞다.
@@ -162,12 +162,12 @@ multibot/
 
 | # | 문서 | `docs/` 파일명 | 클로드 코드가 읽는 시점 |
 | --- | --- | --- | --- |
-| 1 | 멀티봇 허브 요구사항 정의서 | 01-requirements.md | 참고용, 지시문에서 직접 가리키지 않음 |
-| 2 | 멀티봇 허브 아키텍처 설계서 | 02-architecture.md | P1-1, P1-3, P5 |
-| 3 | 멀티봇 어댑터 인터페이스 명세 | 03-adapters.md | P1-2, P2\~P4 |
-| 4 | 멀티봇 오케스트레이터 설계 | 04-orchestrator.md | P1-3(9장), P1-4 |
-| 5 | 멀티봇 UI 설계 | 05-ui.md | P1-1(6장), P1-5, P1-6, P5 |
-| 6 | 멀티봇 로드맵과 클로드 코드 핸드오프 | 06-roadmap.md | 매 세션 (CLAUDE.md가 가리킴) |
+| 1 | Roundtable-Agent 요구사항 정의서 | 01-requirements.md | 참고용, 지시문에서 직접 가리키지 않음 |
+| 2 | Roundtable-Agent 아키텍처 설계서 | 02-architecture.md | P1-1, P1-3, P5 |
+| 3 | Roundtable-Agent 어댑터 인터페이스 명세 | 03-adapters.md | P1-2, P2\~P4 |
+| 4 | Roundtable-Agent 오케스트레이터 설계 | 04-orchestrator.md | P1-3(9장), P1-4 |
+| 5 | Roundtable-Agent UI 설계 | 05-ui.md | P1-1(6장), P1-5, P1-6, P5 |
+| 6 | Roundtable-Agent 로드맵과 클로드 코드 핸드오프 | 06-roadmap.md | 매 세션 (CLAUDE.md가 가리킴) |
 
 **미결 사항 통합** — 어느 단계 전에 결정해야 하는지 기준으로 모았다.
 

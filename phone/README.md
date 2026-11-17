@@ -1,4 +1,4 @@
-# Multibot Worker (phone app)
+# Roundtable-Agent Worker (phone app)
 
 [한국어](README.ko.md)
 
@@ -76,8 +76,8 @@ Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when re
 1. Install the APK (allow apps from unknown sources).
 2. In the app → "Open app info" → ⋮ → "Allow restricted settings" (on Android 13+, sideloaded apps need this
    before the next two permissions can be turned on).
-3. "Open notification access settings" → enable notifications for Multibot Worker.
-4. "Open accessibility settings" → Installed apps → enable Multibot Worker. It connects to the gateway as soon
+3. "Open notification access settings" → enable notifications for Roundtable-Agent Worker.
+4. "Open accessibility settings" → Installed apps → enable Roundtable-Agent Worker. It connects to the gateway as soon
    as it is enabled (you can close the app screen).
 
 ## Behavior

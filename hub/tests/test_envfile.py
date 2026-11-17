@@ -19,5 +19,5 @@ def test_parse_env_rules():
 
 def test_password_url_encoded(tmp_path):
     p = tmp_path / ".env"
-    p.write_text("POSTGRES_USER=multibot\nPOSTGRES_PASSWORD=p@ss:w/rd\n", encoding="utf-8")
-    assert build_test_db_url(p) == "postgresql+asyncpg://multibot:p%40ss%3Aw%2Frd@localhost:5433/multibot_test"
+    p.write_text("POSTGRES_USER=roundtable\nPOSTGRES_PASSWORD=p@ss:w/rd\n", encoding="utf-8")
+    assert build_test_db_url(p) == "postgresql+asyncpg://roundtable:p%40ss%3Aw%2Frd@localhost:5433/roundtable_test"

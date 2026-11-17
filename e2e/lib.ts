@@ -12,7 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export function compose(args: string[], input?: string): string {
   return execFileSync(
     "docker",
-    ["compose", "-p", "multibot-e2e", "--env-file", join(HERE, "out", "env"), "-f", join(HERE, "compose.yml"), ...args],
+    ["compose", "-p", "roundtable-e2e", "--env-file", join(HERE, "out", "env"), "-f", join(HERE, "compose.yml"), ...args],
     { input, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
   );
 }

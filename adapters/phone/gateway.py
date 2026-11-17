@@ -195,7 +195,7 @@ class EventLog:
 
 
 class Gateway:
-    APK_NAME = "multibot-worker.apk"
+    APK_NAME = "roundtable-worker.apk"
     ONCE_TTL_S = 30 * 60
 
     def __init__(

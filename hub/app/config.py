@@ -12,7 +12,7 @@ DEV_SECRET = "dev-only-change-me"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HUB_", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://multibot:multibot@localhost:5433/multibot"
+    database_url: str = "postgresql+asyncpg://roundtable:roundtable@localhost:5433/roundtable"
     # 세션 쿠키 서명 키. 운영에서는 반드시 .env 로 덮어쓴다.
     secret_key: str = DEV_SECRET
     # 로컬 http 개발에서는 false. 운영(caddy TLS 뒤)에서는 true.

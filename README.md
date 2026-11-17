@@ -1,222 +1,343 @@
-# Multibot Hub
+<div align="center">
 
-[한국어](README.ko.md)
+# 🪑 Roundtable-Agent
 
-A personal hub that lets **Claude** orchestrate several consumer AI-assistant apps from one web page.
-You type a message; Claude decides which assistants to ask, relays answers between them (relay, debate,
-meeting), and writes a summary. The assistants are apps without public APIs, so the hub drives them on
-an Android phone through an accessibility-service worker app.
+**Seat your AI assistants at a round table — and let Claude chair the meeting.**
 
-> Single-user, self-hosted. Claude runs as headless **Claude Code** (`claude -p`) logged in with *your*
-> subscription. Sharing the hub with other people would route their traffic through your subscription,
-> which the Claude Code terms do not allow — switch the runner to an API key first if you want that.
-> Driving third-party apps through accessibility automation is unofficial; check each app's terms.
+Ask Pickle, Muse, Vooy and Cue at once, let them argue and build on each other,<br/>
+and get one clean summary from Claude. The assistants are the apps already on your phone.
 
-## How it works
+English · [한국어](README.ko.md)
+
+</div>
+
+---
+
+## Contents
+
+1. [What you can do](#1-what-you-can-do)
+2. [How it works](#2-how-it-works)
+3. [Giving each assistant an identity](#3-giving-each-assistant-an-identity)
+4. [Letting another assistant talk to a room](#4-letting-another-assistant-talk-to-a-room)
+5. [Adding a new app (assistant)](#5-adding-a-new-app-assistant)
+6. [Setup](#6-setup)
+7. [Safety](#7-safety)
+8. [For developers](#8-for-developers)
+
+---
+
+## 1. What you can do
+
+Write in a **room** on the web page as you would to a person. Claude decides which assistants to call.
+
+| You say | What happens |
+|---|---|
+| "Find a lunch place in Gangnam for 2 tomorrow" | Asks the single best assistant and summarizes |
+| "Everyone, ideas for a weekend trip?" | Asks all assistants **at once** and compares them in a table |
+| "Ask Pickle whether the place Muse found can be booked" | Passes one assistant's answer to the next (**relay**) |
+| "Pickle argues for remote work, Muse against — debate" | Claude **moderates**: each side rebuts the other |
+| "Hold a meeting and settle on one team-dinner venue" | Collects views, pits only the disagreements against each other, reaches a **decision** |
+| "Word-chain game, 5 rounds, everyone" | Runs the **game** and enforces the rules |
+| On your phone, tell Pickle "send this to the roundtable room" | An outside assistant **posts into a room** and gets the answer back |
+
+Anything that costs money — payments, booking confirmations — is **always asked first.** The summary ends with
+"Shall I proceed?" and a [Proceed] button; nothing is confirmed until you press it.
+
+---
+
+## 2. How it works
+
+### At a glance
 
 ```mermaid
-flowchart TB
-  subgraph Internet
-    B["Browser<br/>(PC / mobile)"]
-    X["Other assistant<br/>(optional, inbox API)"]
-  end
-  subgraph Host["Your server (Docker Compose)"]
-    E["edge<br/>Caddy, HTTPS<br/>(profile: public)"]
-    W["web<br/>nginx + React UI"]
-    H["hub-api<br/>FastAPI"]
-    DB[("postgres")]
-    R["runner<br/>claude -p"]
-    subgraph AD["adapters (one MCP server per bot)"]
-      A1["vooy"]
-      A2["pickle"]
-      A3["muse"]
-      A4["cue"]
-      M["mock-a/b/c"]
-    end
-    G["phone-gateway"]
-  end
-  subgraph Phone["Android phone"]
-    WK["Multibot Worker<br/>accessibility + notifications"]
-    APPS["Assistant apps<br/>Vooy · Pickle · Muse · Cue"]
-  end
-  B -->|HTTPS| E --> W
-  X -->|"POST /api/inbox"| E
-  W -->|"/api, /ws"| H
-  H --- DB
-  H -->|"one run per message"| R
-  R -->|"MCP: ask / status"| AD
-  AD -->|"screen commands (rpc)"| G
-  WK -->|"WSS /phone/ws (outbound)"| E
-  E -.->|"/phone/ws"| W -.-> G
-  WK -->|"tap / type / read tree"| APPS
-  APPS -.->|"reply notification"| WK
+flowchart LR
+  ME["🙋 You<br/>a room on the web"] -->|question| CH["🪑 Claude<br/>the chair"]
+  CH -->|"decides who to ask, and what"| PH["📱 Your phone<br/>worker app"]
+  PH -->|"opens the app and types for you"| B1["🥒 Pickle"]
+  PH --> B2["🎨 Muse"]
+  PH --> B3["🧭 Vooy"]
+  PH --> B4["🤖 Cue"]
+  B1 & B2 & B3 & B4 -->|"answers"| PH
+  PH -->|"answers"| CH
+  CH -->|"summary · comparison · next step"| ME
 ```
 
-Only `edge` (or `web` locally) is reachable from outside. Adapters, runner and the gateway's internal API stay
-on the Docker network, and the phone connects *outbound*, so it needs no open port.
+- **Claude (the chair)** reads your message, decides which assistants to ask, in what order and with what
+  question, reads each answer, chooses the next move, and writes the summary.
+- **The phone worker app**: the assistant apps have no public API, so the worker opens them, types the message
+  and reads the reply on your behalf (Android accessibility service).
+- **Rooms** are conversations. Claude remembers what was said earlier in each room.
 
-### One message, step by step
+### One question, end to end
 
 ```mermaid
 sequenceDiagram
   autonumber
-  actor U as You (web)
-  participant H as hub-api
-  participant R as runner (claude -p)
-  participant A as bot adapter
-  participant G as phone-gateway
-  participant P as phone worker + app
-  U->>H: send "ask Pickle and Muse about ..."
-  H-->>U: message.ack, run.started
-  H->>R: start run (room context via --resume)
-  R->>A: mcp ask(text, thread_id)
-  H-->>U: bot.pending (pending bubble)
-  A->>G: lease screen, open app, type, press send
-  G->>P: commands over WebSocket
-  P-->>G: reply notification / screen tree
-  G-->>A: reply text
-  A-->>R: AskResult {ok, raw, structured}
-  R-->>H: tool result
-  H-->>U: bot.reply (raw answer bubble)
-  Note over R: relay / debate / meeting =<br/>more ask calls in the same run
-  R-->>H: final summary
-  H-->>U: claude.final, run.finished
+  actor You
+  participant C as 🪑 Claude
+  participant W as 📱 Worker
+  participant P as 🥒 Pickle
+  participant M as 🎨 Muse
+  You->>C: "Everyone, ideas for a weekend trip?"
+  Note over C: choose a mode → ask all at once
+  par at the same time
+    C->>W: briefing for Pickle
+    W->>P: open app, type, send
+    P-->>W: answer
+  and
+    C->>W: briefing for Muse
+    W->>M: open app, type, send
+    M-->>W: answer
+  end
+  W-->>C: both answers (shown on screen as they arrive)
+  C->>You: one-line conclusion + table + caveats + next step
 ```
 
-- **hub/** – login (password + TOTP), sessions ("rooms"), run queue, WebSocket events, bot status panel,
-  external inbox API.
-- **runner/** – starts Claude Code per message with the orchestrator prompt (`runner/orchestrator.md`) and
-  streams tool calls/answers back as events. Execution is capped at 600 s.
-- **adapters/** – one MCP server per assistant (`ask`, `status`). Errors are returned as result fields,
-  never as MCP exceptions. Per-app screen selectors live in `adapters/<bot>/selectors.yaml`.
-  Includes mock bots (`mock-a/b/c`) for development and tests.
-- **phone/** – the Android worker app (Java, no Gradle) and its build/release scripts.
-- **web/** – React + TypeScript UI.
-- **edge/** – optional Caddy front door with automatic HTTPS for your own domain.
-- **docs/** – requirements, architecture, adapter contract, orchestrator, UI, roadmap (Korean).
+On screen, each assistant's bubble first appears as "answering…" and is replaced in place by the original
+answer. Claude's reasoning shows up live as short grey notes.
 
-## Requirements
+---
 
-- Docker with Compose v2
-- GNU Make (optional; the targets are thin wrappers around `docker compose` / `uv` / `pnpm`)
-- For development/tests: Python 3.12 + [uv](https://docs.astral.sh/uv/), Node.js + pnpm 10
-- A Claude subscription that can use Claude Code
-- For real assistants: an Android phone (Android 10+; 11+ recommended for screenshots) with the
-  assistant apps installed and logged in
-- For phone/remote access: **your own domain** (see below)
+## 3. Giving each assistant an identity
 
-## Quick start (mock bots, local only)
+The assistants **don't know each other and don't know what was said in the room.** So identity and role are
+given in three layers.
 
-```bash
-cp .env.example .env            # then replace every change-me with random values
-make up                         # postgres, hub-api, runner, web, phone-gateway, mock bots
-                                # (real-bot adapters start too and stay unavailable until a phone connects)
-make admin ARGS="create-operator --username me"   # prints a TOTP secret for your authenticator app
-make runner-login               # log Claude Code in inside the runner container (once)
+```mermaid
+flowchart TB
+  subgraph L1["① Profile card — written once"]
+    D["description in config.yaml<br/>strengths · weaknesses · response time · language"]
+  end
+  subgraph L2["② Nicknames — written once"]
+    A["aliases in bots.yaml<br/>e.g. Pickle, 피클"]
+  end
+  subgraph L3["③ Briefing — assembled by Claude for every message"]
+    R["role / stance you assigned<br/>'Pickle argues for'"]
+    X["context needed<br/>people · date · place · budget"]
+    O["what others said<br/>key point, with the source named"]
+    T["task and limits<br/>'rebut briefly; don't book yet'"]
+  end
+  D --> CH["🪑 Claude picks<br/>who to call"]
+  A --> CH
+  CH --> MSG["one message to the assistant"]
+  R & X & O & T --> MSG
+  MSG --> BOT["🥒 assistant app"]
 ```
 
-Open http://127.0.0.1:8080, sign in, create a room and try "ask mock-a and mock-b about tomorrow's weather".
-Local ports are bound to 127.0.0.1 only (`docker-compose.override.yml`).
+### ① Profile card (`description` in `adapters/<assistant>/config.yaml`)
 
-## Using your own domain
+The **only introduction** Claude has for that assistant. Be honest about what it is good and bad at and how
+long it takes.
 
-Everything public uses **one value in `.env`: `PUBLIC_HOST`**. No domain is stored in the repository, so
-every user brings their own.
+```yaml
+description: |
+  Personal AI assistant "Pickle", strong at everyday errands in Korea: phone calls on your behalf
+  (restaurant or clinic bookings), domestic shopping and tickets, calendar and email.
+  Simple answers take 10–30 s; real errands take minutes to hours.
+  Asks for confirmation before payments or bookings. Not for coding or long documents.
+```
+
+### ② Nicknames (`aliases` in `hub/bots.yaml`)
+
+The names you use in a room ("Pickle", "피클"). Claude uses your spelling in its summaries too.
+
+### ③ The briefing (assembled by Claude)
+
+Every message to an assistant is put together like this:
+
+> **[Role]** You argue *for* remote work. **[Context]** A 5-person startup, in the office twice a week.
+> **[Other side]** Another assistant (Muse) said "collaboration slows down". **[Task]** Rebut that in 3 lines.
+
+**You** decide the roles. State roles, stances or tone in your message; since the assistants can't remember
+the room, Claude repeats them on every turn.
+
+- "Run a meeting: Pickle is a meticulous finance lead, Muse an idea-heavy planner"
+- "Vooy only argues against. Don't be persuaded"
+- "Everyone answers in one sentence"
+
+---
+
+## 4. Letting another assistant talk to a room
+
+An assistant that can make HTTP requests (Pickle, for example) can **drop an opinion into a room at any time
+and take the answer back.**
+
+```mermaid
+sequenceDiagram
+  actor You as 🙋 You (phone)
+  participant P as 🥒 Pickle
+  participant RT as 🪑 Roundtable
+  You->>P: "Tell the roundtable room 'Saturday works better'"
+  P->>RT: POST /api/inbox (room, text, from)
+  RT->>RT: bubble "(opinion from Pickle) …" in the room, Claude runs
+  alt done within 15 s
+    RT-->>P: answer
+  else takes longer
+    RT-->>P: "still running, fetch it here later"
+    P->>RT: GET result URL
+    RT-->>P: answer
+  end
+  P->>You: Claude's answer
+```
+
+### Introduction to register with the assistant (once)
+
+Tell the outside assistant who it is in your roundtable and how to reach a room. Send this to that assistant
+and ask it to remember it; fill in the `<…>` parts.
+
+```
+From now on you are "Pickle", a participant in my Roundtable meetings.
+When I say "send △△ to the roundtable room ○○", make the request below and show me the answer as-is.
+
+URL: https://<your domain>/api/inbox
+Headers: Authorization: Bearer <HUB_INBOX_TOKEN>, Content-Type: application/json
+Body: {"room": "room name", "text": "what to send", "from": "Pickle"}
+
+- 200: show me `answer`.
+- 202: wait retry_after_s seconds, then GET https://<your domain> + result_url with the same headers.
+- 404: ask me which room from the `rooms` list. 401: tell me the token is wrong.
+- Make clear it is your opinion, and never make payment or booking decisions on my behalf.
+```
+
+> The token is a password. Copy `HUB_INBOX_TOKEN` from `.env` yourself and rotate it if in doubt. Messages
+> from outside appear in the room as `(opinion from …)`.
+
+---
+
+## 5. Adding a new app (assistant)
+
+A chat-style AI app installed on the phone is added with **four files and two config entries**. The hub,
+runner and web code do not change.
+
+```mermaid
+flowchart TB
+  S1["① Install the app on the phone and sign in"] --> S2["② Create its profile folder<br/>adapters/new-assistant/"]
+  S2 --> S3["③ Write its screen guide<br/>selectors.yaml<br/>how to find the input box and send button"]
+  S3 --> S4["④ Register it on the server<br/>one service block in docker-compose.yml<br/>+ the app package the worker watches"]
+  S4 --> S5["⑤ Add it to the roster<br/>one line in hub/bots.yaml + nicknames"]
+  S5 --> S6["⑥ Start and check<br/>available in the bot panel → call it in a room"]
+```
+
+| Step | What to do | Notes |
+|---|---|---|
+| ① | Install the app on the phone and sign in | Your own account |
+| ② | Copy `adapters/cue/` to `adapters/<name>/` (`__init__.py`, `__main__.py`, `config.yaml`, `selectors.yaml`) | Keep `__main__.py`; edit `name`, `description`, `android.package` in `config.yaml` |
+| ③ | In `selectors.yaml`, describe the input box, send button, and text that is not an answer (timestamps, "read") | The other assistants' files are good examples |
+| ④ | In `docker-compose.yml`, copy the `pickle:` service and rename it; add the app package to `PHONE_WATCH_PKGS` of `phone-gateway` | Add a volume too |
+| ⑤ | Add `- {name: <name>, mcp_url: http://<name>:9000/mcp, admin_url: http://<name>:9100, aliases: [nickname]}` to `hub/bots.yaml` | This name becomes Claude's tool name |
+| ⑥ | `docker compose up -d --build`, then check the bot panel | In a room: "say hi to the new assistant" |
+
+The profile card (`description`) *is* the assistant's identity — see [section 3](#3-giving-each-assistant-an-identity).
+
+---
+
+## 6. Setup
+
+You need: a PC that runs Docker, a Claude subscription that can use Claude Code, an Android phone, and **your
+own domain**.
 
 ```mermaid
 flowchart LR
-  D["DNS / dynamic DNS<br/>hub.your-domain.example → your public IP"] --> RT["Router<br/>TCP 443 → hub machine"]
-  RT --> C["edge (Caddy)<br/>Let's Encrypt cert for PUBLIC_HOST"] --> WEB["web :80"]
-  ENV[".env<br/>PUBLIC_HOST=…"] -.-> C
-  ENV -.-> REL["phone/release.sh<br/>worker connects to wss://PUBLIC_HOST/phone/ws"]
+  A["① Download and<br/>fill in .env"] --> B["② Connect your domain<br/>DNS + router port 443"]
+  B --> C["③ Start<br/>docker compose up -d"]
+  C --> D["④ Create your account<br/>+ sign Claude in"]
+  D --> E["⑤ Install the phone worker<br/>from a QR code"]
+  E --> F["🎉 Open a room and talk"]
 ```
 
-1. Point a DNS name at your public IP (any registrar or a dynamic-DNS provider works).
-2. Forward TCP **443** on your router to the machine running the hub.
-3. In `.env`:
+1. **Settings**: copy `.env.example` to `.env` and replace every `change-me` with a random value.
+2. **Your domain**: point a domain (or dynamic-DNS name) at your public IP and forward TCP 443 on your router
+   to this PC. Add to `.env`:
    ```
    PUBLIC_HOST=hub.your-domain.example
    COMPOSE_PROFILES=public
    HUB_COOKIE_SECURE=true
    ```
-4. `docker compose up -d` — the `edge` service (Caddy) obtains a Let's Encrypt certificate for
-   `PUBLIC_HOST` and proxies to the web container.
+   No address is stored in the repository — **everyone uses their own domain**. The certificate is issued automatically.
+3. **Start**: `docker compose up -d` (or `make up`).
+4. **Account and Claude**: `make admin ARGS="create-operator --username me"` creates your account and shows a
+   TOTP secret for your authenticator app. `make runner-login` signs Claude Code in (once).
+5. **Phone**: `phone/release.sh` prints a one-time QR code valid for 30 minutes. Scan it on the phone, install,
+   and enable notification access and the accessibility service. Details: [phone/README.md](phone/README.md).
+6. Open `https://<your domain>`, sign in, create a room — done.
 
-If you prefer a tunnel or another reverse proxy, point it at the `web` container (port 80) and still set
-`PUBLIC_HOST` so the phone release script knows the address.
+> Want to try it with fake assistants first? Stop after step 3, open `http://127.0.0.1:8080` and send
+> "ask mock-a and mock-b about the weather".
 
-## Connecting the phone
+---
 
-```bash
-phone/release.sh
-```
+## 7. Safety
 
-Builds the worker APK with your `PUBLIC_HOST` and device token, publishes it for auto-update, and prints a
-**one-time, 30-minute** download link plus a QR code (`phone/dist/qr.png`). The APK contains the device
-token: never commit it or share the link. On the phone, install it, allow restricted settings, then enable
-the notification listener and the accessibility service (details in [phone/README.md](phone/README.md)).
-Only one phone is connected at a time. Use a phone without a secure lock if you want the worker to wake
-the screen by itself; it never unlocks a secure lock.
+| It does | It never does |
+|---|---|
+| **Always asks** before payments or booking confirmations ([Proceed] button) | Spend money without your confirmation |
+| Shows the assistants' original answers | Rewrite an answer and present it as the original |
+| Marks the phone "unavailable" when the screen is off or locked | **Unlock a secure lock screen** |
+| Forwards only the length and type of notifications | Send notification titles or bodies to the server |
+| Lets Claude use only the "ask an assistant" tools | Shell, file and web tools are blocked |
 
-Then enable the real bots (`vooy`, `pickle`, `muse`, `cue`) in the hub's bot panel. Adding a bot is one
-line in `hub/bots.yaml` plus an adapter folder — `hub/`, `runner/` and `web/` do not change.
+- The confirmation-before-payment rule is currently enforced by Claude's instructions; an additional code-level
+  lock is planned.
+- Single-user only. Claude runs on **your** subscription; sharing the hub would violate the Claude Code terms.
+- Driving other companies' apps through accessibility features is unofficial — check each app's terms.
+- Never commit or share `.env`, built APKs or anything in `phone/dist/` (they contain tokens).
 
-## External inbox (optional)
+---
 
-Another assistant (for example one that can make HTTP requests) can post into a room at any time:
+## 8. For developers
+
+<details>
+<summary>Components and development commands</summary>
 
 ```mermaid
-sequenceDiagram
-  participant X as Other assistant
-  participant H as hub-api
-  participant R as runner
-  X->>H: POST /api/inbox {room, text, from} + Bearer token
-  H->>H: find room by title, add "(from) text" as a user message
-  H->>R: normal run
-  alt finished within 15 s
-    H-->>X: 200 {status: done, answer}
-  else still running
-    H-->>X: 202 {status, result_url, retry_after_s}
-    X->>H: GET result_url (same token, later)
-    H-->>X: 200 {status: done, answer}
+flowchart TB
+  subgraph Internet
+    BR["Browser"]
+    X["Other assistant (inbox)"]
   end
+  subgraph Host["Your server (Docker Compose, project roundtable)"]
+    E["edge · Caddy HTTPS (profile: public)"]
+    W["web · nginx + React"]
+    H["hub-api · FastAPI"]
+    DB[("postgres")]
+    R["runner · claude -p"]
+    AD["adapters · one MCP server per assistant (ask / status)"]
+    G["phone-gateway"]
+  end
+  subgraph Phone["Android phone"]
+    WK["Roundtable-Agent Worker"]
+    APPS["Assistant apps"]
+  end
+  BR -->|HTTPS| E --> W -->|"/api, /ws"| H --- DB
+  X -->|"POST /api/inbox"| E
+  H -->|"one run per message"| R -->|MCP| AD -->|"screen commands"| G
+  WK -->|"WSS /phone/ws (outbound)"| E
+  WK --> APPS
 ```
 
-```
-POST https://<PUBLIC_HOST>/api/inbox
-Authorization: Bearer <HUB_INBOX_TOKEN>
-{"room": "room title", "text": "message", "from": "pickle"}
-```
-
-- The room is matched by title (whitespace/case-insensitive, then a unique partial match). Unknown rooms
-  return 404 with the list of room titles.
-- The message is added as a user message and a normal run starts. The call waits up to 15 s: if the run
-  finished, it returns `200 {"status": "done", "answer": ...}`; otherwise `202` with `result_url`. Fetch
-  `GET <result_url>` with the same token later.
-- Disabled unless `HUB_INBOX_TOKEN` is set. Limited to 10 posts/minute and 4000 characters.
-
-## Development
+| Folder | Contents |
+|---|---|
+| `hub/` | Login (password + TOTP), rooms, run queue, WebSocket events, bot status, inbox API |
+| `runner/` | Runs Claude Code per message with the orchestrator prompt (`runner/orchestrator.md`), 600 s cap |
+| `adapters/` | One MCP server per assistant. Errors are result fields, not exceptions. Mock assistants `mock-a/b/c` |
+| `phone/` | Android worker (Java, no Gradle) and build/release scripts |
+| `web/` | React + TypeScript UI |
+| `edge/` | Caddy front door for your domain |
+| `docs/` | Requirements, architecture, adapter contract, orchestrator, UI, roadmap (Korean) |
 
 ```bash
 make test        # hub, runner, adapters (unit + contract), web
-make eval        # orchestrator evaluation with the real claude -p against mock bots (needs runner-login)
-make types       # regenerate web/src/types/events.ts from hub/app/events.py
+make eval        # orchestrator evaluation with the real claude -p against mock assistants
+make types       # hub/app/events.py → web/src/types/events.ts
 ```
 
-Contracts that must stay stable: the adapter MCP `ask`/`status` schemas (docs/03), the WebSocket event
-envelope and type list (docs/05 §6), and the runner interface. See [CLAUDE.md](CLAUDE.md) for the working
-rules used in this repo.
+Stable contracts: the adapter `ask`/`status` schemas (docs/03), the WebSocket event envelope and type list
+(docs/05 §6), and the runner interface. Working rules: [CLAUDE.md](CLAUDE.md).
 
-## Security notes
+</details>
 
-- Never commit `.env`, built APKs, or anything under `phone/dist/`. Secrets (adapter token, device token,
-  inbox token, cookie key) are generated per installation.
-- Internal services (adapters, runner, phone-gateway internal API) are reachable only on the Docker
-  network; only the web container is exposed (and through `edge` when the `public` profile is on).
-- Bot answers are untrusted text that flows into Claude's context. Claude is limited to the bots' `ask` /
-  `status` tools (shell, file and web tools are disallowed), and the orchestrator prompt never confirms a
-  payment or booking without your explicit approval in the next message.
+---
 
 ## License
 
-[MIT](LICENSE). This covers the whole repository, including the Android worker app in `phone/`.
+[MIT](LICENSE) — covers the whole repository, including the phone worker in `phone/`.

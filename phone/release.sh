@@ -3,7 +3,7 @@
 #   phone/release.sh                                  (.env 의 PUBLIC_HOST 로 https://<PUBLIC_HOST> 를 쓴다)
 #   PHONE_PUBLIC_URL=https://<주소> phone/release.sh   (다른 주소로 줄 때만)
 # 기기 토큰(PHONE_DEVICE_TOKEN)·허브 토큰(HUB_ADAPTER_TOKEN)은 레포 루트 .env 에서 읽는다.
-# 결과: phone/dist/multibot-worker.apk, latest.json, qr.png (전부 레포에 넣지 않음)
+# 결과: phone/dist/roundtable-worker.apk, latest.json, qr.png (전부 레포에 넣지 않음)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GW="${PHONE_GATEWAY_LOCAL:-http://127.0.0.1:9200}"
@@ -27,10 +27,10 @@ OUT="$ROOT/phone/build"
 PHONE_WS_URL="$WS" PHONE_DEVICE_TOKEN="$DEV_TOKEN" PHONE_VERSION_CODE="$CODE" PHONE_VERSION_NAME="$NAME" \
   bash "$ROOT/phone/build.sh" "$OUT" >/dev/null
 DIST="$ROOT/phone/dist"; mkdir -p "$DIST"
-cp "$OUT/multibot-worker.apk" "$DIST/.multibot-worker.apk.tmp"
-mv -f "$DIST/.multibot-worker.apk.tmp" "$DIST/multibot-worker.apk"
-SHA="$(sha256sum "$DIST/multibot-worker.apk" | cut -d' ' -f1)"
-SIZE="$(stat -c %s "$DIST/multibot-worker.apk")"
+cp "$OUT/roundtable-worker.apk" "$DIST/.roundtable-worker.apk.tmp"
+mv -f "$DIST/.roundtable-worker.apk.tmp" "$DIST/roundtable-worker.apk"
+SHA="$(sha256sum "$DIST/roundtable-worker.apk" | cut -d' ' -f1)"
+SIZE="$(stat -c %s "$DIST/roundtable-worker.apk")"
 printf '{"versionCode": %s, "versionName": "%s", "sha256": "%s", "size": %s, "host": "%s"}\n' \
   "$CODE" "$NAME" "$SHA" "$SIZE" "$host" > "$DIST/latest.json"
 echo "게시: v$NAME ($CODE), $SIZE bytes, 서버 $WS"

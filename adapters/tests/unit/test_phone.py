@@ -393,7 +393,7 @@ async def test_apk_distribution(tmp_path):
             dev = {"Authorization": f"Bearer {DEV}"}
             # 아직 배포본 없음
             assert (await c.get("/phone/apk/latest.json", headers=dev)).status_code == 404
-            (dist / "multibot-worker.apk").write_bytes(b"APKDATA")
+            (dist / "roundtable-worker.apk").write_bytes(b"APKDATA")
             (dist / "latest.json").write_text(json.dumps({"versionCode": 7, "versionName": "x", "sha256": "s"}), encoding="utf-8")
             # 기기 토큰 없으면 막힌다. 허브 토큰도 안 된다
             assert (await c.get("/phone/apk/latest.json")).status_code == 401

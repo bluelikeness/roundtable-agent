@@ -8,11 +8,11 @@ Five Playwright scenarios. They run against mock adapters with the real hub, dat
 ```bash
 make e2e                       # start the stack → run all 5 → stop the stack
 make e2e ARGS="-g T8"          # a single scenario
-make e2e E2E_KEEP=1            # keep the stack running afterwards (faster reruns). Stop it with: docker compose -p multibot-e2e down
+make e2e E2E_KEEP=1            # keep the stack running afterwards (faster reruns). Stop it with: docker compose -p roundtable-e2e down
 ```
 
 Requirements: the runner's Claude Code login (`make runner-login`; the e2e stack borrows the production volume
-`multibot_runner-claude`), Node 20+ and pnpm, Playwright Chromium (`cd e2e && pnpm exec playwright install chromium`).
+`roundtable_runner-claude`), Node 20+ and pnpm, Playwright Chromium (`cd e2e && pnpm exec playwright install chromium`).
 In Git Bash, do not set `MSYS_NO_PATHCONV=1`: it breaks the pnpm path inside make.
 
 ## Scenarios
@@ -30,8 +30,8 @@ In Git Bash, do not set `MSYS_NO_PATHCONV=1`: it breaks the pnpm path inside mak
 - **Why it is not part of `make test`**: it runs the real `claude -p`. It needs the runner login and uses
   subscription quota, and LLM answers vary between runs, so it is not deterministic. Like `make eval`, it is a
   separate target to run after prompt or UI changes and at gate checks.
-- **Separate compose project `multibot-e2e`**: it never touches the production stack (`multibot`) or the
-  evaluation stack (`multibot-eval`). The database is on tmpfs and only the web UI is exposed, on `127.0.0.1:8090`.
+- **Separate compose project `roundtable-e2e`**: it never touches the production stack (`roundtable`) or the
+  evaluation stack (`roundtable-eval`). The database is on tmpfs and only the web UI is exposed, on `127.0.0.1:8090`.
 - **Switching scenarios**: bot names (tool names `mcp__mock-a__*`) stay the same; only the `mcp_url` in the
   hub's `bots.yaml` (`e2e/out/bots/bots.yaml`) is pointed at a variant mock container. The hub rereads this file
   on every run and every health check (every 2 seconds in E2E). No hub code was changed. Mock settings are the

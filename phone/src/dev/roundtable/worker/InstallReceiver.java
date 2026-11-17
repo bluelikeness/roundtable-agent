@@ -1,4 +1,4 @@
-package dev.multibot.worker;
+package dev.roundtable.worker;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

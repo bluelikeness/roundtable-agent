@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 멀티봇 워커 (docs/proposals/phone-worker.md). 휴대폰의 봇 앱(Vooy·피클·뮤즈)을 접근성 서비스로 조종하고
+<!-- Roundtable-Agent 워커 (docs/proposals/phone-worker.md). 휴대폰의 봇 앱(Vooy·피클·뮤즈)을 접근성 서비스로 조종하고
      허브의 폰 게이트웨이(wss://…/phone/ws)에 바깥으로 연결한다. 봇은 모르고 범용 명령만 수행한다. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="dev.multibot.worker"
+    package="dev.roundtable.worker"
     android:versionCode="3"
     android:versionName="0.3">
 
@@ -28,7 +28,7 @@
     </queries>
 
     <application
-        android:label="멀티봇 워커"
+        android:label="Roundtable-Agent 워커"
         android:icon="@android:drawable/ic_menu_share"
         android:allowBackup="false"
         android:usesCleartextTraffic="true">
@@ -70,7 +70,7 @@
         <service
             android:name=".NotifListener"
             android:exported="true"
-            android:label="멀티봇 워커 알림"
+            android:label="Roundtable-Agent 워커 알림"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
@@ -80,7 +80,7 @@
         <service
             android:name=".A11y"
             android:exported="true"
-            android:label="멀티봇 워커"
+            android:label="Roundtable-Agent 워커"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
