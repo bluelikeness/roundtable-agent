@@ -20,7 +20,7 @@ services:
     environment:
       HUB_WEBHOOK_URL: http://webhook-sink:8000/internal/bot-status
   # Vooy 어댑터 코드를 가짜 기기(adapters/testing/fake_vooy.py)에 붙여 계약 테스트에 올린다.
-  # 실제 에뮬레이터·계정은 쓰지 않는다. 실봇 대상(vooy)은 CONTRACT_TARGETS=vooy 로 따로 돌린다(adapters/vooy/README.md)
+  # 실제 에뮬레이터·계정은 쓰지 않는다. 실봇 대상(vooy)은 CONTRACT_TARGETS=vooy 로 따로 돌린다(adapters/vooy/README.ko.md)
   vooy-fake:
     build:
       context: ./adapters

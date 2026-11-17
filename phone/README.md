@@ -1,46 +1,94 @@
-# 멀티봇 워커 (휴대폰 앱)
+# Multibot Worker (phone app)
 
-사용자 휴대폰에서 Vooy·피클·뮤즈 앱을 접근성 서비스로 조종하는 안드로이드 앱이다(docs/proposals/phone-worker.md, ADR-9).
-허브의 폰 게이트웨이에 바깥으로 WebSocket 연결(`wss://<허브 주소>/phone/ws`)하고, 게이트웨이가 보내는 범용 명령
-(`adapters/phone/protocol.py`의 COMMANDS)을 수행한다. 봇별 판단은 서버 어댑터가 한다. 앱이 바뀌어도 서버의 `selectors.yaml`만 고친다.
+[한국어](README.ko.md)
 
-## 빌드
+An Android app that drives the Vooy, Pickle and Muse apps on your phone through an accessibility service
+(docs/proposals/phone-worker.md, ADR-9). It opens an outbound WebSocket to the hub's phone gateway
+(`wss://<hub address>/phone/ws`) and executes the gateway's generic commands (COMMANDS in
+`adapters/phone/protocol.py`). All bot-specific decisions are made by the server-side adapters; when an app
+changes, only the server's `selectors.yaml` needs updating.
 
-Gradle 없이 Android SDK build-tools와 Android Studio JDK로 빌드한다.
+## How it connects
 
-```bash
-PHONE_WS_URL=wss://hub.example/phone/ws PHONE_DEVICE_TOKEN=<.env 의 값> phone/build.sh <출력 폴더>
+```mermaid
+sequenceDiagram
+  participant A as Adapter (server)
+  participant G as phone-gateway
+  participant W as Worker (phone)
+  participant APP as Assistant app
+  W->>G: WSS /phone/ws + device token, hello {device, sdk}
+  loop every 15 s
+    W-->>G: heartbeat
+  end
+  A->>G: rpc (launch / tree / set_text / tap ...)
+  G->>W: command
+  W->>APP: accessibility action
+  W-->>G: result (tree XML, ok)
+  APP-->>W: reply notification
+  W-->>G: notification event (length + channel only)
+  G-->>A: result / event
 ```
 
-두 env는 앱의 기본 설정값이 된다(앱 화면에서 바꿀 수 있다). 토큰이 APK 안에 들어가므로 빌드한 APK는 레포에 넣지 않고 본인 휴대폰에만 설치한다.
+### Auto-update
 
-## 배포와 자동 업데이트
-
-```bash
-phone/release.sh   # .env 의 PUBLIC_HOST(각자의 도메인)로 https://<PUBLIC_HOST> 를 쓴다
+```mermaid
+flowchart LR
+  REL["phone/release.sh"] -->|"build + sha256"| DIST["phone/dist/<br/>APK + latest.json"]
+  REL -->|"one-time link + QR"| QR["first install"]
+  DIST --> GW["phone-gateway<br/>/phone/apk/*"]
+  W["Worker"] -->|"on connect, every 6 h,<br/>or update_check"| GW
+  GW -->|"newer versionCode"| W
+  W -->|"verify sha256 →<br/>PackageInstaller"| W
 ```
 
-다른 주소로 배포할 때만 `PHONE_PUBLIC_URL=https://<주소> phone/release.sh`처럼 덮어쓴다.
+## Build
 
-- 빌드(버전 번호는 2026-01-01부터 초 단위) → `phone/dist/`에 게시. `phone-gateway`가 이 폴더를 읽어 워커 자동 업데이트에 쓴다.
-- 30분 동안 한 번만 쓰는 설치 링크와 QR(`phone/dist/qr.png`)을 만든다. APK 안에 기기 토큰이 있어 공개 링크는 두지 않는다.
-- 연결된 휴대폰에 `update_check`를 보낸다. 워커는 연결될 때와 6시간마다 스스로도 확인한다.
-- 워커는 새 버전을 기기 토큰으로 내려받아 SHA-256을 확인하고 PackageInstaller로 설치한다. 안드로이드 14+는
-  `UPDATE_PACKAGES_WITHOUT_USER_ACTION` 권한 덕에 확인 창 없이 설치되고, 설치 뒤 접근성 서비스가 다시 켜져 저절로 다시 연결한다
-  (에뮬레이터 API 34에서 확인). 서버 주소가 바뀐 배포는 이전 주소로 닿지 않으므로 QR로 다시 설치한다.
+Built without Gradle, using the Android SDK build-tools and the Android Studio JDK.
 
-## 설치와 권한 (처음 한 번)
+```bash
+PHONE_WS_URL=wss://hub.example/phone/ws PHONE_DEVICE_TOKEN=<value from .env> phone/build.sh <output dir>
+```
 
-1. APK 설치(출처를 알 수 없는 앱 허용).
-2. 앱 → "앱 정보 열기" → ⋮ → "제한된 설정 허용"(안드로이드 13+에서 직접 설치한 앱은 이걸 해야 다음 두 권한을 켤 수 있다).
-3. "알림 접근 설정 열기" → 멀티봇 워커 알림 켜기.
-4. "접근성 설정 열기" → 설치된 앱 → 멀티봇 워커 켜기. 켜지면 바로 게이트웨이에 연결한다(앱 화면을 닫아도 된다).
+The two variables become the app's default settings (they can be changed in the app). The token is embedded
+in the APK, so never commit a built APK; install it only on your own phone.
 
-## 동작
+## Release and auto-update
 
-- 연결: 끊기면 1→30초 지수 백오프로 다시 붙는다. 하트비트 15초.
-- 명령: `state`(화면·잠금·전경 앱·키보드 위치), `watch`, `launch`(런처 인텐트), `tree`(앱 창의 접근성 트리를 uiautomator dump 형식 XML로), `tap`, `set_text`, `paste`(붙여넣은 뒤 클립보드 비움), `global`(home·back), `screenshot`(안드로이드 11+).
-- 알림: `watch`로 받은 앱(Vooy·피클·뮤즈)의 알림만 이벤트로 올린다. 제목·본문은 보내지 않고 길이·채널만 보낸다.
-- 화면 기록에는 명령 이름·상태만 남기고 메시지 내용은 남기지 않는다.
+```bash
+phone/release.sh   # uses https://<PUBLIC_HOST> from .env (your own domain)
+```
 
-개인 휴대폰 기준이다. 화면이 꺼졌거나 잠겨 있으면 어댑터가 `backend_down`으로 보고하고 조종하지 않는다.
+Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when releasing to a different address.
+
+- Builds (version code = seconds since 2026-01-01) and publishes to `phone/dist/`. `phone-gateway` serves
+  this folder for worker auto-updates.
+- Creates a one-time install link valid for 30 minutes and a QR code (`phone/dist/qr.png`). Because the APK
+  contains the device token, there is no public download link.
+- Sends `update_check` to the connected phone. The worker also checks by itself on connect and every 6 hours.
+- The worker downloads the new version with its device token, verifies the SHA-256 and installs it with
+  PackageInstaller. On Android 14+ the `UPDATE_PACKAGES_WITHOUT_USER_ACTION` permission lets it install
+  without a prompt; the accessibility service comes back on after the update and reconnects by itself
+  (verified on an API 34 emulator). A release that changes the server address cannot reach phones still
+  using the old address, so reinstall from the QR code.
+
+## Install and permissions (first time)
+
+1. Install the APK (allow apps from unknown sources).
+2. In the app → "Open app info" → ⋮ → "Allow restricted settings" (on Android 13+, sideloaded apps need this
+   before the next two permissions can be turned on).
+3. "Open notification access settings" → enable notifications for Multibot Worker.
+4. "Open accessibility settings" → Installed apps → enable Multibot Worker. It connects to the gateway as soon
+   as it is enabled (you can close the app screen).
+
+## Behavior
+
+- Connection: reconnects with exponential backoff from 1 to 30 seconds. Heartbeat every 15 seconds.
+- Commands: `state` (screen, lock, foreground app, keyboard position), `watch`, `launch` (launcher intent),
+  `tree` (the app window's accessibility tree as uiautomator-dump XML), `tap`, `set_text`, `paste` (clears the
+  clipboard after pasting), `global` (home, back), `screenshot` (Android 11+).
+- Notifications: only notifications from apps passed to `watch` (Vooy, Pickle, Muse) are reported as events.
+  Titles and bodies are never sent, only length and channel.
+- The on-screen log keeps only command names and status, never message content.
+
+Designed for a personal phone. If the screen is off or locked, the adapter reports `backend_down` and does
+not operate the phone.
