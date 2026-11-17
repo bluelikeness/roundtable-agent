@@ -13,17 +13,73 @@
 
 ## 동작 방식
 
+```mermaid
+flowchart TB
+  subgraph Internet
+    B["브라우저<br/>(PC·모바일)"]
+    X["다른 비서<br/>(선택, 바깥 입구)"]
+  end
+  subgraph Host["내 서버 (Docker Compose)"]
+    E["edge<br/>Caddy, HTTPS<br/>(profile: public)"]
+    W["web<br/>nginx + React UI"]
+    H["hub-api<br/>FastAPI"]
+    DB[("postgres")]
+    R["runner<br/>claude -p"]
+    subgraph AD["adapters (봇마다 MCP 서버 하나)"]
+      A1["vooy"]
+      A2["pickle"]
+      A3["muse"]
+      A4["cue"]
+      M["mock-a/b/c"]
+    end
+    G["phone-gateway"]
+  end
+  subgraph Phone["안드로이드 휴대폰"]
+    WK["멀티봇 워커<br/>접근성 + 알림"]
+    APPS["비서 앱<br/>Vooy · 피클 · 뮤즈 · Cue"]
+  end
+  B -->|HTTPS| E --> W
+  X -->|"POST /api/inbox"| E
+  W -->|"/api, /ws"| H
+  H --- DB
+  H -->|"메시지 하나 = 실행 하나"| R
+  R -->|"MCP: ask / status"| AD
+  AD -->|"화면 명령(rpc)"| G
+  WK -->|"WSS /phone/ws (바깥으로 연결)"| E
+  E -.->|"/phone/ws"| W -.-> G
+  WK -->|"탭·입력·화면 읽기"| APPS
+  APPS -.->|"답 알림"| WK
 ```
- 브라우저 ──HTTPS──> web (nginx) ──/api, /ws──> hub-api (FastAPI, Postgres)
-                                                  │  메시지 하나 = 실행 하나
-                                                  ▼
-                                               runner ── claude -p ── MCP 툴: <봇>__ask / status
-                                                                         │
-                                       adapters (봇마다 MCP 서버 하나) ──┘
-                                                  │ 범용 화면 명령
-                                                  ▼
- 안드로이드 휴대폰: 워커 앱 ──WSS /phone/ws──> phone-gateway
- (접근성 서비스가 비서 앱을 조종하고, 알림 리스너가 답을 잡는다)
+
+바깥에서 닿는 것은 `edge`(이 PC에서는 `web`)뿐입니다. 어댑터, 러너, 게이트웨이 내부 API는 Docker 내부망에만 있고,
+휴대폰은 *바깥으로* 연결하므로 휴대폰 쪽에 열어 둘 포트가 없습니다.
+
+### 메시지 한 건이 처리되는 순서
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as 나 (웹)
+  participant H as hub-api
+  participant R as runner (claude -p)
+  participant A as 봇 어댑터
+  participant G as phone-gateway
+  participant P as 휴대폰 워커 + 앱
+  U->>H: "피클이랑 뮤즈한테 … 물어봐" 전송
+  H-->>U: message.ack, run.started
+  H->>R: 실행 시작 (방 맥락은 --resume)
+  R->>A: mcp ask(text, thread_id)
+  H-->>U: bot.pending (대기 말풍선)
+  A->>G: 화면 임대, 앱 열기, 입력, 전송 버튼
+  G->>P: WebSocket 으로 명령
+  P-->>G: 답 알림 / 화면 트리
+  G-->>A: 답 글
+  A-->>R: AskResult {ok, raw, structured}
+  R-->>H: 툴 결과
+  H-->>U: bot.reply (원문 말풍선)
+  Note over R: 릴레이·토론·회의 =<br/>같은 실행 안에서 ask 를 더 부른다
+  R-->>H: 최종 정리
+  H-->>U: claude.final, run.finished
 ```
 
 - **hub/** – 로그인(비밀번호 + TOTP), 세션(방), 실행 대기열, WebSocket 이벤트, 봇 상태 패널, 바깥 입구 API.
@@ -63,6 +119,14 @@ http://127.0.0.1:8080 에 들어가 로그인하고, 방을 만든 뒤 "mock-a�
 바깥으로 열리는 주소는 모두 **`.env`의 `PUBLIC_HOST` 값 하나**로 정해집니다. 저장소에는 도메인을 넣지 않으므로
 쓰는 사람마다 자기 도메인을 씁니다.
 
+```mermaid
+flowchart LR
+  D["DNS / DDNS<br/>hub.내도메인.example → 집 공인 IP"] --> RT["공유기<br/>TCP 443 → 허브 PC"]
+  RT --> C["edge (Caddy)<br/>PUBLIC_HOST 인증서 자동 발급"] --> WEB["web :80"]
+  ENV[".env<br/>PUBLIC_HOST=…"] -.-> C
+  ENV -.-> REL["phone/release.sh<br/>워커 접속 주소 wss://PUBLIC_HOST/phone/ws"]
+```
+
 1. 도메인(또는 DDNS 이름)이 집 공인 IP를 가리키게 합니다. 어느 등록업체나 DDNS 서비스든 됩니다.
 2. 공유기에서 바깥 TCP **443**을 허브가 도는 PC로 넘깁니다(포트 포워딩).
 3. `.env`에 넣습니다.
@@ -85,7 +149,7 @@ phone/release.sh
 `PUBLIC_HOST`와 기기 토큰으로 워커 APK를 빌드해 자동 업데이트용으로 게시하고, **30분 동안 한 번만** 쓰는 다운로드
 링크와 QR(`phone/dist/qr.png`)을 만듭니다. APK 안에 기기 토큰이 들어 있으니 커밋하거나 링크를 공유하지 마세요.
 휴대폰에서 설치한 뒤 "제한된 설정 허용"을 하고, 알림 접근과 접근성 서비스를 켭니다(자세한 순서는
-[phone/README.md](phone/README.md)). 휴대폰은 한 번에 한 대만 붙습니다. 워커가 화면을 스스로 깨우게 하려면 보안 잠금이
+[phone/README.ko.md](phone/README.ko.md)). 휴대폰은 한 번에 한 대만 붙습니다. 워커가 화면을 스스로 깨우게 하려면 보안 잠금이
 없는 휴대폰을 쓰세요. 보안 잠금은 절대 풀지 않습니다.
 
 그다음 허브의 봇 패널에서 실제 봇(`vooy`, `pickle`, `muse`, `cue`)을 켭니다. 봇 추가는 `hub/bots.yaml` 한 줄과 어댑터
@@ -94,6 +158,23 @@ phone/release.sh
 ## 바깥 입구 (선택)
 
 HTTP 요청을 보낼 수 있는 다른 비서(예: 피클)가 아무 때나 방에 의견을 넣을 수 있습니다.
+
+```mermaid
+sequenceDiagram
+  participant X as 다른 비서
+  participant H as hub-api
+  participant R as runner
+  X->>H: POST /api/inbox {room, text, from} + Bearer 토큰
+  H->>H: 제목으로 방 찾기, "(보낸이에서 보낸 의견) 글"을 사용자 메시지로
+  H->>R: 평소와 같은 실행
+  alt 15초 안에 끝남
+    H-->>X: 200 {status: done, answer}
+  else 아직 진행 중
+    H-->>X: 202 {status, result_url, retry_after_s}
+    X->>H: 나중에 GET result_url (같은 토큰)
+    H-->>X: 200 {status: done, answer}
+  end
+```
 
 ```
 POST https://<PUBLIC_HOST>/api/inbox
