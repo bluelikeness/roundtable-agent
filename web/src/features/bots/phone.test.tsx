@@ -23,6 +23,7 @@ describe("사용할 폰", () => {
   it("이름을 알아보기 쉽게 보이고, 바꾸는 중인지 판단한다", () => {
     expect(phoneLabel("samsung SM-S938N")).toBe("갤럭시 S25 울트라 (SM-S938N)");
     expect(phoneLabel("pixel 9")).toBe("pixel 9");
+    expect(phoneLabel("samsung SM-X920N")).toBe("갤럭시 탭 (SM-X920N)");
     expect(switching({ prefer: "", current: "a", devices: [] })).toBe(false);
     expect(switching({ prefer: "SM-N960N", current: "samsung SM-S938N", devices: [] })).toBe(true);
     expect(switching({ prefer: "SM-N960N", current: "samsung SM-N960N", devices: [] })).toBe(false);

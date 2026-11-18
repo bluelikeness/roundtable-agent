@@ -206,6 +206,23 @@ async def test_poll_updates_db_and_broadcasts_changes(adapter):
     assert [e.payload.bot for e in m.snapshot()] == ["mock-a"]
 
 
+async def test_poll_reprobes_backend_down(adapter):
+    """backend_down 봇은 health 가 아니라 probe 로 다시 확인해 저절로 돌아온다(폰 잠금이 풀린 뒤 등)."""
+    m = adapter.monitor
+    adapter.health = {**adapter.health, "available": False, "reason": "backend_down"}
+    await m.poll_once()
+    assert adapter.requests[-1].url.path == "/health"
+    assert m.statuses["mock-a"].reason == "backend_down"
+    # 다음 주기: probe 로 확인하고, 성공하면 돌아온다
+    adapter.health = {**adapter.health, "available": True, "reason": None}
+    await m.poll_once()
+    assert adapter.requests[-1].url.path == "/probe"
+    assert m.statuses["mock-a"].available is True
+    # 돌아온 뒤에는 다시 health 만 읽는다
+    await m.poll_once()
+    assert adapter.requests[-1].url.path == "/health"
+
+
 async def test_disable_is_hub_truth(authed, adapter, settings):
     r = await authed.post("/api/bots/mock-a/disable")
     assert r.json()["enabled"] is False and r.json()["reason"] == "disabled"

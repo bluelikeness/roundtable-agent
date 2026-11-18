@@ -103,8 +103,19 @@ class BotMonitor:
             await asyncio.sleep(self.settings.health_interval_s)
 
     async def poll_once(self) -> None:
+        """health 를 읽는다. backend_down 인 봇은 probe 로 실제 다시 확인한다.
+
+        어댑터의 backend_down 은 성공(ask·probe)해야 풀린다. 그런데 허브는 backend_down 봇을 Claude 도구에서 빼므로
+        ask 가 올 수 없다. health 만 읽으면 폰 잠금·연결 끊김처럼 잠깐 실패한 봇이 사람이 다시 확인할 때까지
+        영영 빠져 있다(폰을 바꿀 때마다 봇이 "없다"던 원인). 그래서 주기마다 probe 로 다시 본다.
+        """
         bots = [b for b in self.bots() if b.admin_url]
-        await asyncio.gather(*(self.refresh(b.name) for b in bots), return_exceptions=True)
+
+        def down(name: str) -> bool:
+            p = self.statuses.get(name)
+            return p is not None and p.enabled and p.reason == "backend_down"
+
+        await asyncio.gather(*(self.refresh(b.name, probe=down(b.name)) for b in bots), return_exceptions=True)
 
     # --- 봇 목록 ---
 

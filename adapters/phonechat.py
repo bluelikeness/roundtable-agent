@@ -138,6 +138,7 @@ class PhoneChatAdapter(AndroidAdapter):
     SEND_SETTLE_S = 0.4
     SEND_CHECK_S = 1.0
     SEND_TRIES = 3
+    ROW_SETTLE_S = 4.0  # 글을 넣은 뒤 입력줄 버튼이 늘기를 기다리는 시간(rightmost_when_row_grows 앱)
     SEND_FIRST_CHECK_S = 0.3
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(느린 휴대폰은 트리 반영이 몇 초 늦다)
     FOCUS_SETTLE_S = 1.0
@@ -507,6 +508,14 @@ class PhoneChatAdapter(AndroidAdapter):
         휴대폰은 그림으로 비교한다(자리를 옮긴 옛 버튼을 새 버튼으로 오인하지 않게). 그림이 없으면 None.
         """
         row = self._row_buttons(root)
+        if self.phone_mode and self.sel.get("send_tree_rule") == "rightmost_when_row_grows" and self._pre_bounds:
+            # 입력줄 버튼이 늘어야(마이크가 밀리고 ↑ 가 생김) 고른다. 트리는 화면보다 늦게 바뀐다
+            # (2026-11-18 탭 팝업 Cue: 글을 넣고 1.5초 뒤에도 옛 마이크 하나뿐 → 그림이 바뀐 옛 자리를 ↑ 로 오인)
+            loop = asyncio.get_running_loop()
+            until = loop.time() + self.ROW_SETTLE_S
+            while len(row) <= len(self._pre_bounds) and loop.time() < until:
+                await asyncio.sleep(0.5)
+                row = self._row_buttons(await self.tree())
         if self.phone_mode:
             now = await self._icons(row)
             if now is None or self._pre_icons is None:
@@ -561,7 +570,19 @@ class PhoneChatAdapter(AndroidAdapter):
     async def _press(self, node: UiNode, source: str) -> None:
         log.info("전송 버튼 누름: %s %s %s", source, node.cls.rsplit(".", 1)[-1], node.bounds.as_tuple())
         if source == "base" and self.sel.get("send_u2") and hasattr(self.device, "click_selector"):
-            await self.device.click_selector(self.sel["send_u2"])  # 접근성 클릭(RN 버튼)
+            # 접근성 클릭(RN 버튼). 후보를 차례로, 다 못 찾으면 찾은 노드 자리에 접근성 클릭
+            # (2026-11-18 탭 뮤즈: 전송 버튼에 testID 가 없고 이름(메시지 보내기)만 있다)
+            for sel in candidates(self.sel["send_u2"]):
+                try:
+                    await self.device.click_selector(self.scoped(sel))
+                    return
+                except Exception as e:  # noqa: BLE001 - 워커: 누를 노드를 찾지 못함
+                    log.info("send_u2 %s 실패: %s", sel, e)
+            if hasattr(self.device, "click_at"):
+                x, y = node.bounds.center
+                await self.device.click_at(x, y)
+            else:
+                await self.tap(node)
         elif source != "base" and hasattr(self.device, "click_at"):
             x, y = node.bounds.center
             await self.device.click_at(x, y)  # 그 자리의 버튼에 접근성 클릭(Flutter·RN 아이콘 버튼)
@@ -656,14 +677,20 @@ class PhoneChatAdapter(AndroidAdapter):
         ime, width, dp = st.get("ime_top"), st.get("width"), float(st.get("density") or 0)
         if not width or not dp:
             return False
-        if ime:
+        root = await self.tree()
+        win = self.app_window(root)
+        popup = win is not None and (win.right - win.left) < width * 0.95
+        if ime and not popup:
             y = int(ime - 35 * dp)  # 키보드가 떠 있으면 입력줄은 키보드 바로 위
         else:
-            field = find_first(await self.tree(), self.sel["input"])
+            # 키보드 없이 글이 들어간 경우, 또는 태블릿 팝업 창(키보드와 떨어져 있다): 입력줄 그대로
+            field = find_first(root, self.sel["input"])
             if field is None:
                 return False
-            y = field.bounds.center[1]  # 키보드 없이 글이 들어간 경우: 입력줄 그대로
-        x = int(width - 40 * dp)
+            y = field.bounds.center[1]
+        # 전송 버튼 자리는 앱 창의 오른쪽 끝(팝업이면 화면 끝이 아니다)
+        right = win.right if popup and win is not None else width
+        x = int(right - 40 * dp)
         if hasattr(self.device, "click_at"):
             await self.device.click_at(x, y)  # 접근성 클릭(Flutter·RN 아이콘 버튼은 좌표 탭이 안 먹을 수 있다)
         else:

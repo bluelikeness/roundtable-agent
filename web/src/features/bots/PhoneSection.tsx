@@ -14,6 +14,9 @@ const MODEL_NAMES: [RegExp, string][] = [
   [/SM-S928/i, "갤럭시 S24 울트라"],
   [/SM-N960/i, "갤럭시 노트9"],
   [/SM-N975|SM-N976/i, "갤럭시 노트10+"],
+  [/SM-X91[06]/i, "갤럭시 탭 S9 울트라"],
+  // 그 밖의 갤럭시 탭은 모델이 많아 계열로 묶는다(SM-X…: 탭 S8 이후·A9, SM-T…/SM-P…: 이전 탭)
+  [/SM-[XTP]\d{3}/i, "갤럭시 탭"],
 ];
 
 export function phoneLabel(device: string): string {
