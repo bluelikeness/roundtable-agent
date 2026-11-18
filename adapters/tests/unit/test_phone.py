@@ -800,3 +800,17 @@ def test_other_chat_on_screen_is_not_reply(tmp_path):
     # 한 번 본 뒤로는 보낸 글이 밀려 올라가 안 보여도 새 글을 읽는다
     got = a._new_texts(screen(["안녕하세요, 저는 뮤즈예요", "이어지는 긴 답"]))
     assert [n.text for n in got] == ["안녕하세요, 저는 뮤즈예요", "이어지는 긴 답"]
+
+
+def test_chat_room_name_from_env(tmp_path, monkeypatch):
+    """Cue 대화방 이름은 계정마다 달라 레포에 넣지 않고 CUE_CHAT_ROOM 으로 준다. 없으면 그 항목은 건너뛴다."""
+    a = _bot_adapter("cue", tmp_path)
+    monkeypatch.delenv("CUE_CHAT_ROOM", raising=False)
+    assert all("name_env" not in t for t in a._chat_tabs()) and len(a._chat_tabs()) == 1
+    monkeypatch.setenv("CUE_CHAT_ROOM", "my.agent")
+    import re
+
+    sel = a._chat_tabs()[-1]
+    assert sel["clickable"] is True
+    assert re.search(sel["desc_re"], "my.agent\n설명") and re.search(sel["desc_re"], "my.agent")
+    assert not re.search(sel["desc_re"], "myXagent") and not re.search(sel["desc_re"], "my.agent2")

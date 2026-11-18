@@ -1,0 +1,28 @@
+# Roundtable-Agent
+
+> Roundtable-Agent seats the AI assistant apps on your Android phone (Pickle, Muse, Vooy, Cue) at one table and lets Claude Code chair the meeting. You ask once in a web room; Claude decides which assistants to ask, sends the questions through a phone worker app that types into each app for you, reads every answer, and writes one summary. Self-hosted, single user, Docker Compose.
+
+Key ideas:
+
+- Assistant apps without a public API are driven through an Android accessibility-service worker (phone) or uiautomator2 (emulator). Each app is an MCP server with the same two tools: `ask` and `status`.
+- Claude Code runs headless as the orchestrator (fan-out, relay, debate, summary) and only talks to assistants through those MCP tools.
+- Other assistants can post into a room over HTTP (`POST /api/inbox`) and fetch Claude's answer later.
+- Works with phones and tablets, including apps shown in pop-up or split-screen windows.
+
+## Docs
+
+- [README](README.md): what it does, how it works, setup, safety
+- [README (Korean)](README.ko.md)
+- [Requirements](docs/01-requirements.md)
+- [Architecture](docs/02-architecture.md)
+- [Adapters and the MCP ask/status contract](docs/03-adapters.md)
+- [Orchestrator](docs/04-orchestrator.md)
+- [Web UI and WebSocket events](docs/05-ui.md)
+
+## Code
+
+- [hub/](hub/): FastAPI hub (rooms, runs, bot status, inbox)
+- [runner/](runner/): headless Claude Code runner and orchestrator prompt
+- [adapters/](adapters/): one MCP adapter per assistant app, phone gateway, fakes for contract tests
+- [phone/](phone/): Android worker app (accessibility service)
+- [web/](web/): React web UI

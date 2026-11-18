@@ -203,6 +203,8 @@ services:
     command: ["python", "-m", "adapters.cue"]
     environment:
       HUB_WEBHOOK_URL: http://hub-api:8000/internal/bot-status
+      # Cue 에서 쓸 에이전트 대화방 이름(계정마다 다름). 비우면 열려 있는 대화방을 쓴다
+      CUE_CHAT_ROOM: ${CUE_CHAT_ROOM:-}
       ANDROID_DEVICE_FACTORY: adapters.phone.device:PhoneDevice
       PHONE_GATEWAY_URL: http://phone-gateway:9200
     volumes:

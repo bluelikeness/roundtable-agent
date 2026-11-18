@@ -13,12 +13,12 @@ send: []
 # 자리에 버튼이 그대로 있으면 그 맨 오른쪽이 ↑(마이크는 왼쪽으로 밀린다). 2026-11-12 노트9·안드로이드 10 확인
 send_tree_rule: rightmost_when_row_grows
 # 앱을 다시 열면 입력줄이 "길게 눌러 말하기, 탭하여 입력" 버튼이다(탭 = 글 입력 모드, 길게 = 음성).
-# 대화 목록이 나오면 에이전트 대화방(사용자가 만든 에이전트)을 누른다. 다른 에이전트를 쓰려면
-# 이름만 바꾼다. 목록 항목의 content-desc 첫 줄이 에이전트 이름이다. 입력줄 버튼을 먼저 둔다(대화방 머리글이
+# 대화 목록이 나오면 사용자가 만든 에이전트 대화방을 누른다. 이름은 계정마다 달라 .env 의 CUE_CHAT_ROOM 으로
+# 준다(목록 항목의 content-desc 첫 줄이 에이전트 이름). 입력줄 버튼을 먼저 둔다(대화방 머리글이
 # 에이전트 이름과 같을 수 있다)
 chat_tabs:
   - {desc_re: "탭하여 입력|[Tt]ap to (type|input)", clickable: true}
-  - {desc_re: "^my-agent(\n|$)", clickable: true}
+  - {name_env: CUE_CHAT_ROOM}
 # 시각은 "오후 7:20"·"7:20 오후"·"7:20 PM" 모두 답이 아니다
 exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*([AaPp][Mm]|오전|오후))?\s*$|^\s*\d{1,2}월\s*\d{1,2}일|^(오늘|어제|Today|Yesterday)$'
 exclude_button_re: '^(뒤로|Agent 프로필)'

@@ -20,7 +20,9 @@ selectors.yaml 키 (input·input_u2·send 는 셀렉터 하나 또는 후보 목
                 다음부터 먼저 쓴다. 글을 넣기 전에도 있던 버튼(음성·마이크)은 절대 누르지 않는다
   focus_input   true 면 글을 넣기 전에 입력창을 탭한다(Flutter: 포커스 없이 넣은 글은 화면에 반영되지 않는다)
   chat_tabs     입력창이 없을 때 차례로 눌러 볼 대화 탭·버튼 셀렉터 목록(없으면 뒤로가기). 입력창을
-                탭해야 글 입력 모드가 되는 앱(Cue)은 그 입력줄 버튼도 여기 둔다
+                탭해야 글 입력 모드가 되는 앱(Cue)은 그 입력줄 버튼도 여기 둔다.
+                {name_env: 환경변수} 항목은 그 값(대화방 이름)으로 시작하는 목록 항목을 누른다. 대화방 이름은
+                계정마다 달라 저장소에 넣지 않고 .env 로 준다(값이 없으면 그 항목은 건너뛴다)
   exclude_text_re   봇 답에서 뺄 글(시각·"복사" 같은 UI 글자)
   exclude_button_re 버튼에서 뺄 라벨
   exclude_inside_desc_re  content-desc 가 이것과 맞는 노드(3단계 위 조상까지) 안의 글은 답이 아니다. 대화 목록 위에
@@ -39,6 +41,7 @@ import contextlib
 import hashlib
 import io
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -215,11 +218,22 @@ class PhoneChatAdapter(AndroidAdapter):
 
     # --- 준비 --------------------------------------------------------------
 
+    def _chat_tabs(self) -> list[dict[str, Any]]:
+        out = []
+        for sel in self.sel.get("chat_tabs") or []:
+            if isinstance(sel, dict) and "name_env" in sel:
+                name = os.environ.get(str(sel["name_env"]), "").strip()
+                if name:
+                    out.append({"desc_re": "^" + re.escape(name) + r"(\n|$)", "clickable": True})
+            else:
+                out.append(sel)
+        return out
+
     async def _ensure_ready(self) -> None:
         await self.ensure_device()
         if await self.ensure_foreground():
             await self._wait_ready(self.android.app_start_wait_s)
-        tabs = list(self.sel.get("chat_tabs") or [])
+        tabs = self._chat_tabs()
         for attempt in range(len(tabs) + 2):
             root = await self.tree()
             if self._is_login_screen(root):
@@ -239,7 +253,7 @@ class PhoneChatAdapter(AndroidAdapter):
         """입력창이 보일 때까지. or_tabs 면 눌러 볼 대화 탭·입력줄 버튼이 보여도 멈춘다(앱이 뜬 것)."""
         loop = asyncio.get_running_loop()
         end = loop.time() + timeout_s
-        tabs = list(self.sel.get("chat_tabs") or []) if or_tabs else []
+        tabs = self._chat_tabs() if or_tabs else []
         while True:
             root = await self.tree()
             node = find_first(root, self.sel["input"]) or find_first(root, tabs)
