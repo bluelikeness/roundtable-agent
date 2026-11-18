@@ -437,11 +437,43 @@ class AndroidAdapter(BotAdapter):
 
     # --- 기기 상태 ---------------------------------------------------------
 
+    # 다른 앱 창을 걸러도 남겨 둘 시스템 창(권한·설치 확인 등. 봇 앱 흐름 위에 뜬다)
+    SYSTEM_WINDOW_PKGS = ("android", "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+                          "com.android.packageinstaller", "com.google.android.packageinstaller")
+
     async def tree(self) -> UiNode:
         try:
-            return parse_hierarchy(await self.device.dump())
+            root = parse_hierarchy(await self.device.dump())
         except ET.ParseError as e:
             raise BackendDown(f"접근성 트리를 읽지 못함: {e}") from e
+        return self.own_windows(root) if self.phone_mode else root
+
+    def own_windows(self, root: UiNode) -> UiNode:
+        """휴대폰: 이 앱의 창만 남긴다(맨 위 노드 하나가 창 하나).
+
+        태블릿은 여러 앱을 팝업·분할 화면으로 함께 띄운다. 그러면 트리에 다른 앱의 입력창·버튼이 섞여
+        "첫 EditText" 가 다른 앱 것이 된다(2026-11-18 탭 S9 울트라: Vooy 가 피클 입력창을 집음).
+        이 앱 창이 하나도 없으면(앱이 앞에 없음) 그대로 둔다 — 앞 화면 판단은 원래대로.
+        """
+        pkg = self.android.package
+        mine = [w for w in root.children if w.package == pkg]
+        if not mine or len(mine) == len(root.children):
+            return root
+        keep = [w for w in root.children if w.package == pkg or w.package in self.SYSTEM_WINDOW_PKGS]
+        out = UiNode(cls=root.cls)
+        for w in keep:
+            w.parent = out
+            out.children.append(w)
+        return out
+
+    def app_window(self, root: UiNode) -> Bounds | None:
+        """이 앱 창(여럿이면 가장 큰 것)의 화면 위치. 팝업이면 화면보다 작다."""
+        wins = [w.bounds for w in root.children if w.package == self.android.package and not w.bounds.empty]
+        return max(wins, key=lambda b: (b.right - b.left) * (b.bottom - b.top)) if wins else None
+
+    def scoped(self, selector: dict[str, str]) -> dict[str, str]:
+        """기기(워커·uiautomator2)로 보내는 셀렉터를 이 앱 창으로 한정한다(휴대폰만)."""
+        return {**selector, "packageName": self.android.package} if self.phone_mode else selector
 
     async def ensure_device(self) -> None:
         """에뮬레이터가 부팅돼 있는지. 아니면 복구(재부팅)를 뒤에서 걸고 BackendDown."""
@@ -506,7 +538,7 @@ class AndroidAdapter(BotAdapter):
             await self.device.send_keys(text)
             await self.device.clear_clipboard()  # 클립보드에 마지막 입력이 남지 않게
         else:
-            await self.device.set_text(u2_selector, text)
+            await self.device.set_text(self.scoped(u2_selector), text)
 
     async def crop_screenshot(self, bounds: Bounds, alt: str | None = None) -> str | None:
         """화면을 노드 bounds 로 잘라 이미지 스토리지에 넣고 /images/<id> 를 돌려준다."""

@@ -692,3 +692,80 @@ def test_cue_button_row_below_multiline_input(tmp_path):
     a._pre_field = Bounds(188, 1565, 1223, 1715)
     row = a._row_buttons(parse_hierarchy(xml))
     assert [n.bounds.as_tuple() for n in row] == [(1238, 1573, 1373, 1708)]
+
+
+def test_tablet_popup_only_own_app_window(tmp_path):
+    """2026-11-18 갤럭시 탭 S9 울트라: 여러 앱을 팝업으로 함께 띄우면 트리에 다른 앱 창이 섞인다.
+    휴대폰에서는 이 앱 창(과 시스템 창)만 보고, 워커로 보내는 셀렉터도 이 앱으로 한정한다. 피클의 좌표 대비책은
+    화면 끝이 아니라 팝업 창 오른쪽 끝을 기준으로 한다."""
+    from adapters.android_base import Bounds, parse_hierarchy
+    from adapters.phonechat import find_first
+
+    def win(pkg: str, b: str, inner: str) -> str:
+        return f'<node class="android.widget.FrameLayout" package="{pkg}" text="" content-desc="" clickable="false" bounds="{b}">{inner}</node>'
+
+    def edit(pkg: str, b: str) -> str:
+        return f'<node class="android.widget.EditText" package="{pkg}" text="" content-desc="" clickable="true" bounds="{b}"/>'
+
+    xml = (
+        "<hierarchy>"
+        + win("com.pickle.client", "[842,300][1658,1600]", edit("com.pickle.client", "[911,1421][1520,1493]"))
+        + win("com.vooy.mobile", "[1437,300][2264,1620]", edit("com.vooy.mobile", "[1502,1433][2138,1484]"))
+        + win("android", "[900,800][1800,1000]", "")
+        + "</hierarchy>"
+    )
+    a = _bot_adapter("vooy", tmp_path)
+    a.device = type("Phone", (), {"wait_notification": None})()
+    root = a.own_windows(parse_hierarchy(xml))
+    assert [w.package for w in root.children] == ["com.vooy.mobile", "android"]
+    assert find_first(root, {"cls": "EditText"}).bounds == Bounds(1502, 1433, 2138, 1484)
+    assert a.app_window(root) == Bounds(1437, 300, 2264, 1620)
+    assert a.scoped({"className": "android.widget.EditText"}) == {
+        "className": "android.widget.EditText", "packageName": "com.vooy.mobile"}
+    # 이 앱 창이 없으면(앱이 앞에 없음) 그대로
+    other = parse_hierarchy("<hierarchy>" + win("com.pickle.client", "[0,0][10,10]", "") + "</hierarchy>")
+    assert a.own_windows(other) is other
+    # 에뮬레이터(휴대폰 아님)는 셀렉터를 바꾸지 않는다
+    a.device = object()
+    assert a.scoped({"className": "x"}) == {"className": "x"}
+
+
+async def test_cue_waits_for_row_to_grow_before_guessing(tmp_path, monkeypatch):
+    """2026-11-18 탭 팝업 Cue: 글을 넣은 직후 트리는 아직 옛 마이크 하나뿐이다(화면에는 마이크가 밀리고 ↑ 가 생김).
+    그 자리 그림이 바뀌었다고 옛 노드를 ↑ 로 고르지 않고, 버튼 줄이 늘 때까지 기다려 새 맨 오른쪽(↑)을 고른다."""
+    from adapters.android_base import Bounds, parse_hierarchy
+
+    def screen(buttons: list[str]) -> str:
+        def node(cls: str, b: str) -> str:
+            return f'<node class="{cls}" package="ai.manus.agents" text="" content-desc="" clickable="true" bounds="{b}"/>'
+
+        return (
+            '<hierarchy><node class="android.view.View" package="ai.manus.agents" text="" content-desc="" clickable="false" bounds="[286,295][1174,1626]">'
+            + node("android.widget.EditText", "[361,1506][1021,1566]")
+            + "".join(node("android.widget.ImageView", b) for b in buttons)
+            + "</node></hierarchy>"
+        )
+
+    a = _bot_adapter("cue", tmp_path)
+    a.device = type("Phone", (), {"wait_notification": None})()
+    a.ROW_SETTLE_S = 2.0
+    a._pre_field = Bounds(385, 1506, 1063, 1566)
+    a._pre_bounds = [(1069, 1509, 1123, 1563)]
+    a._pre_icons = [b"mic"]
+    stale = parse_hierarchy(screen(["[1069,1509][1123,1563]"]))
+    grown = parse_hierarchy(screen(["[1027,1509][1081,1563]", "[1093,1509][1147,1563]"]))
+    reads = []
+
+    async def tree():
+        reads.append(1)
+        return grown
+
+    async def icons(nodes):
+        # 옛 자리는 그림이 반쯤 바뀌어 "새 그림"으로 보인다. 늘어난 줄에서는 마이크가 그대로, ↑ 만 새 그림
+        return [(n, b"mic" if n.bounds.left == 1027 else b"new") for n in nodes]
+
+    monkeypatch.setattr(a, "tree", tree)
+    monkeypatch.setattr(a, "_icons", icons)
+    monkeypatch.setattr("adapters.phonechat.same_icon", lambda x, y: x == y)
+    n = await a._appeared(stale)
+    assert reads and n.bounds.as_tuple() == (1093, 1509, 1147, 1563)

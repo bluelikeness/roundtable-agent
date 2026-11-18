@@ -286,6 +286,11 @@ final class Commands {
         if (sel.has("textMatches") && !text.matches(sel.optString("textMatches"))) return false;
         if (sel.has("resourceId") && !rid.equals(sel.optString("resourceId"))) return false;
         if (sel.has("className") && !cls.equals(sel.optString("className"))) return false;
+        // 태블릿 팝업·분할 화면: 여러 앱 창이 함께 떠 있어 다른 앱의 입력창을 집지 않게 앱으로 한정한다
+        if (sel.has("packageName")) {
+            String pkg = n.getPackageName() == null ? "" : n.getPackageName().toString();
+            if (!pkg.equals(sel.optString("packageName"))) return false;
+        }
         return true;
     }
 

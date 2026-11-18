@@ -2,11 +2,16 @@
 # 기준: 실기기 측정(2026-11-11, 멀티봇 시험기). React Native testID 가 resource-id 로 나온다.
 input: {rid: hatch-message-input}
 input_u2: {resourceId: hatch-message-input}
-send: {rid: hatch-send-button}
+# 탭(2026-11-18, 16.0.0.11.159)은 전송 버튼에 testID 가 없고 이름만 있다(빈 입력창이면 '음성 입력')
+send:
+  - {rid: hatch-send-button}
+  - {desc: 메시지 보내기, cls: Button}
 # 전송 버튼은 입력창에 글이 있을 때만 보인다. 누른 뒤 사라지면 전송된 것(그 자리는 음성 버튼)
 send_only_with_text: true
 # 휴대폰에서는 전송 버튼을 좌표 탭이 아니라 접근성 클릭으로 누른다(uiautomator2 셀렉터 키)
-send_u2: {resourceId: hatch-send-button}
+send_u2:
+  - {resourceId: hatch-send-button}
+  - {description: 메시지 보내기, className: android.widget.Button}
 chat_tabs: []
 # 시각, 읽음 표시("방금 읽음"·"3분 전 읽음"·Read·Seen)는 답이 아니다(2026-11-11 실기기: 피클 "방금 읽음"을 답으로 오인)
 exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*[AaPp][Mm])?\s*$|^\s*((방금|\d+\s*(초|분|시간)\s*전)\s*)?읽음\s*$|^(Read|Seen)\b'
