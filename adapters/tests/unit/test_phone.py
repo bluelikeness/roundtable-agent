@@ -769,3 +769,34 @@ async def test_cue_waits_for_row_to_grow_before_guessing(tmp_path, monkeypatch):
     monkeypatch.setattr("adapters.phonechat.same_icon", lambda x, y: x == y)
     n = await a._appeared(stale)
     assert reads and n.bounds.as_tuple() == (1093, 1509, 1147, 1563)
+
+
+def test_other_chat_on_screen_is_not_reply(tmp_path):
+    """2026-11-18 탭 뮤즈: 답을 읽으러 앱을 열었더니 다른 대화방이 떠 있었고, 보낸 글이 없으니 그 방 글 전부를
+    '새 글'로 보고 답으로 넘겼다. 보낸 글을 한 번도 못 봤으면 읽지 않는다. 한 번 본 뒤에는(긴 답에 밀려 사라져도)
+    전처럼 읽는다."""
+    from adapters.android_base import parse_hierarchy
+
+    def screen(texts: list[str]) -> object:
+        def tv(i: int, t: str) -> str:
+            return (f'<node class="android.widget.TextView" package="com.facebook.aura" text="{t}" content-desc="" '
+                    f'clickable="false" bounds="[100,{200 + i * 100}][900,{280 + i * 100}]"/>')
+
+        return parse_hierarchy(
+            '<hierarchy><node class="android.view.View" package="com.facebook.aura" text="" content-desc="" '
+            'clickable="false" bounds="[0,0][1000,2000]">' + "".join(tv(i, t) for i, t in enumerate(texts)) + "</node></hierarchy>"
+        )
+
+    a = _bot_adapter("muse", tmp_path)
+    before = screen(["지난 질문", "지난 답"])
+    a._baseline = {a._sig(n) for n in a._texts(before)}
+    a._sent_norm = "자기소개 해 주세요"
+    a._chat_seen = False
+    # 다른 대화방: 보낸 글도, 이 방의 글도 없다
+    assert a._new_texts(screen(["다른 방의 내 말", "다른 방의 답"])) == []
+    # 이 방: 보낸 글 아래가 답
+    got = a._new_texts(screen(["지난 질문", "지난 답", "자기소개 해 주세요", "안녕하세요, 저는 뮤즈예요"]))
+    assert [n.text for n in got] == ["안녕하세요, 저는 뮤즈예요"]
+    # 한 번 본 뒤로는 보낸 글이 밀려 올라가 안 보여도 새 글을 읽는다
+    got = a._new_texts(screen(["안녕하세요, 저는 뮤즈예요", "이어지는 긴 답"]))
+    assert [n.text for n in got] == ["안녕하세요, 저는 뮤즈예요", "이어지는 긴 답"]

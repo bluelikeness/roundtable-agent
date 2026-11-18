@@ -7,7 +7,9 @@ description: |
   코딩·긴 문서 작성·일반 지식 질문에는 쓰지 않는다.
 # swiftshader(GPU 없음) 에뮬레이터에서는 화면 조회 한 번이 6~27초다(P2 스모크 측정, 대화가 길수록 느림).
 # sending 단계(준비 확인·입력·전송 확인)가 조회 4번이라 send_s 를 넉넉히 둔다
-timeouts: {default_s: 180, send_s: 90, quiet_s: 3}
+# 휴대폰 한 대를 여러 봇이 나눠 쓰면(전체 질문) 다른 봇의 전송·읽기를 기다리는 시간이 더해진다. 2026-11-18 탭에서
+# Vooy 혼자 108초, 네 봇 동시에는 180초를 넘겨 timeout → 기본 시간을 계약 상한(240초)까지 늘린다
+timeouts: {default_s: 240, send_s: 90, quiet_s: 3}
 queue: {max_depth: 5, max_wait_s: 60}
 min_interval_s: 3
 progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있", "^알아보고 있"]

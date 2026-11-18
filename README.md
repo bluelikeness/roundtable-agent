@@ -9,6 +9,9 @@ and get one clean summary from Claude. The assistants are the apps already on yo
 
 English · [한국어](README.ko.md)
 
+<img src="docs/media/roundtable-demo.gif" alt="Roundtable-Agent demo" width="820"/><br/>
+<sub>A replay of two real runs: (1) ask all four assistants at once and Claude sums up, (2) an assistant on the phone (Pickle) picks a room on the hub, hands over a task and fetches the answer (<a href="#4-letting-another-assistant-talk-to-a-room">section 4</a>). Nicknames, names and account details are removed, and wait times are shortened.</sub>
+
 </div>
 
 ---
