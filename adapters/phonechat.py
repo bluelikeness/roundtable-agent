@@ -138,7 +138,8 @@ class PhoneChatAdapter(AndroidAdapter):
     SEND_SETTLE_S = 0.4
     SEND_CHECK_S = 1.0
     SEND_TRIES = 3
-    ROW_SETTLE_S = 4.0  # 글을 넣은 뒤 입력줄 버튼이 늘기를 기다리는 시간(rightmost_when_row_grows 앱)
+    # 글을 넣은 뒤 입력줄 버튼이 늘기를 기다리는 시간(rightmost_when_row_grows 앱). 탭 Cue 는 트리가 4초 넘게 늦기도 했다
+    ROW_SETTLE_S = 10.0
     SEND_FIRST_CHECK_S = 0.3
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(느린 휴대폰은 트리 반영이 몇 초 늦다)
     FOCUS_SETTLE_S = 1.0
@@ -161,6 +162,7 @@ class PhoneChatAdapter(AndroidAdapter):
         self._confirm_re = re.compile(s["confirm_button_re"]) if s.get("confirm_button_re") else None
         self._baseline: set[str] = set()
         self._sent_norm: str | None = None
+        self._chat_seen = False  # 보낸 뒤 내 말풍선을 한 번이라도 봤는가(본 뒤로는 긴 답에 밀려 사라져도 같은 방)
         self._thread: Thread | None = None
         self.learned = LearnedSelectors(self.state_dir / "learned_selectors.json")
         self._app_key = app_key(self.android.package, None)
@@ -275,6 +277,7 @@ class PhoneChatAdapter(AndroidAdapter):
         root = await self.tree()
         self._baseline = {self._sig(n) for n in self._texts(root)}
         self._sent_norm = None
+        self._chat_seen = False
 
         if tap is not None:
             label = (thread.data.get("buttons") or {}).get(tap)
@@ -722,7 +725,14 @@ class PhoneChatAdapter(AndroidAdapter):
         texts = self._texts(root)
         anchor = self._own_anchor(root)
         if anchor is not None:
+            self._chat_seen = True
             new = [n for n in texts if n.bounds.top >= anchor.bounds.bottom]
+        elif self._baseline and self._sent_norm and not self._chat_seen:
+            # 보낸 글이 한 번도 보이지 않았는데 화면이 바뀌었다 = 다른 대화방일 수 있다(2026-11-18 탭 뮤즈: 같은 계정을
+            # 다른 기기에서 쓰면 앱이 가장 최근 대화방을 띄워, 그 방의 글 전부를 답으로 읽었다). 이 방의 글이 다시
+            # 보일 때까지 아무것도 읽지 않는다(못 읽으면 timeout 이 낫다. 남의 대화를 답으로 넘기지 않는다)
+            log.warning("보낸 글이 화면에 없음(다른 대화방일 수 있음): 답으로 읽지 않음")
+            return []
         else:
             new = [n for n in texts if self._sig(n) not in self._baseline]
         want = self._sent_norm or ""

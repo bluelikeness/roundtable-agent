@@ -9,6 +9,9 @@ Claude가 그 내용을 한 장으로 정리해 줍니다. 비서들은 내 휴�
 
 [English](README.md) · 한국어
 
+<img src="docs/media/roundtable-demo.gif" alt="Roundtable-Agent demo" width="820"/><br/>
+<sub>실제로 돌린 두 흐름을 다시 그린 시연입니다. ① 네 비서에게 한 번에 묻고 Claude 가 정리, ② 휴대폰의 비서(피클)가 허브의 방을 골라 일을 맡기고 답을 받아 감(<a href="#4-다른-비서가-방에-말-걸게-하기">4장</a>). 비서 별명·이름·계정은 지웠고, 걸린 시간은 줄였습니다.</sub>
+
 </div>
 
 ---
