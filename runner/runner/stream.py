@@ -5,6 +5,7 @@
 - system/init                → run.started {claude_session_id}
 - assistant 의 tool_use(ask) → bot.pending (+ tool_call 시작 기록)
 - assistant 의 tool_use(status) → 이벤트 없음, tool_call 기록만
+- assistant 의 tool_use(WebSearch) → claude.note "웹 검색: <검색어>" (결과는 표시하지 않음)
 - user 의 tool_result(ask)   → bot.reply (+ tool_call 결과 기록)
 - assistant 의 text          → claude.note. 단 마지막 text 는 result 의 최종 답과 같으므로,
                                다음 tool_use·tool_result 가 올 때까지 잡아 두었다가 note 로 내보낸다
@@ -154,9 +155,15 @@ class StreamParser:
 
     def _on_tool_use(self, block: dict[str, Any]) -> list[Item]:
         call_id = block.get("id")
-        parsed = parse_tool_name(block.get("name") or "")
+        name = block.get("name") or ""
+        if name == "WebSearch":
+            # 웹 검색은 봇이 아니라 이벤트 계약 그대로 claude.note 한 줄로 보여 준다
+            query = (block.get("input") or {}).get("query") if isinstance(block.get("input"), dict) else None
+            text = f"웹 검색: {query}" if query else "웹 검색"
+            return [self._event(ClaudeNote, "claude.note", ClaudeNotePayload(run_id=self.run_id, text=text))]
+        parsed = parse_tool_name(name)
         if not call_id or parsed is None:
-            return []  # 봇 툴이 아니다. --disallowedTools 로 막혀 있어 정상 흐름에는 없다
+            return []  # 봇 툴도 웹 검색도 아니다. --tools 로 빠져 있어 정상 흐름에는 없다
         bot, tool = parsed
         args = block.get("input") if isinstance(block.get("input"), dict) else None
         self._calls[call_id] = _Call(bot=bot, tool=tool, started=self.now())

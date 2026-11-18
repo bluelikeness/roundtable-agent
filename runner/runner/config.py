@@ -29,7 +29,13 @@ class RunnerSettings(BaseSettings):
     tool_timeout_s: float = 270
     # SIGTERM 뒤 이만큼 기다렸다가 SIGKILL
     term_grace_s: float = 5
-    disallowed_tools: str = "Bash,Read,Write,Edit,WebSearch,WebFetch"
+    disallowed_tools: str = "Bash,Read,Write,Edit,WebFetch"
+    # 봇 툴 말고 Claude 가 직접 쓰는 내장 툴(쉼표 구분). 2026-11-18 웹 검색 허용. 빈 값이면 내장 툴 없음
+    web_tools: str = "WebSearch"
+
+    @property
+    def builtin_tools(self) -> list[str]:
+        return [t.strip() for t in self.web_tools.split(",") if t.strip()]
     # 허브↔어댑터·러너 공유 토큰(X-Hub-Token). compose secret 파일
     token_file: Path = Path("/run/secrets/hub_adapter_token")
     # 토론 라운드 상한·자동 확정 상한(04 8장 주입 변수, 값 조정은 P1-4)

@@ -113,8 +113,8 @@ class ClaudeCodeRunner(Runner):
             "--append-system-prompt-file", str(run_dir / "orchestrator.md"),
             "--mcp-config", str(run_dir / "mcp.json"),
             "--strict-mcp-config",
-            # 내장 툴을 전부 뺀다(파일·셸·웹·Task·Skill 등). MCP 툴만 남는다
-            "--tools", "",
+            # 내장 툴은 web_tools(기본 WebSearch)만 남긴다(파일·셸·WebFetch·Task·Skill 등은 뺀다)
+            "--tools", ",".join(s.builtin_tools),
             # 계정에서 동기화되는 플러그인의 hook 이 러너에서 돌지 않게 한다(P0 ④: 빈 설정으로 실행)
             "--settings", HOOKLESS_SETTINGS,
             # --tools 로 이미 빠지지만 설계(02 4장)의 명시적 차단 목록도 그대로 둔다
@@ -123,7 +123,7 @@ class ClaudeCodeRunner(Runner):
         ]
         if s.max_turns > 0:
             args += ["--max-turns", str(s.max_turns)]
-        tools = allowed_tools(session.bots)
+        tools = allowed_tools(session.bots) + s.builtin_tools
         if tools:
             args += ["--allowedTools", ",".join(tools)]
         if resume:

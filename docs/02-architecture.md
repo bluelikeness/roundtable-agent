@@ -61,7 +61,8 @@ claude -p "<사용자 메시지>" \
   --append-system-prompt-file ./orchestrator.md \
   --mcp-config ./mcp.json --strict-mcp-config \
   --allowedTools "mcp__vooy__ask,mcp__vooy__status,mcp__muse__ask,mcp__muse__status,..." \  # 가용 봇별로 러너가 생성
-  --disallowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
+  --tools "WebSearch" \                     # 내장 툴은 웹 검색만(2026-11-18, RUNNER_WEB_TOOLS)
+  --disallowedTools "Bash,Read,Write,Edit,WebFetch" \
   --model sonnet
 ```
 
@@ -70,7 +71,7 @@ claude -p "<사용자 메시지>" \
 | 세션 매핑 | 허브 세션 1 : Claude Code 세션 1, `--resume` | 봇 원문·되물음 맥락을 Claude가 직접 기억. 허브가 맥락을 재조립할 필요 없음 |
 | 세션 수명 | 허브 세션 삭제 시 함께 폐기. 메시지 간 24시간 넘으면 새 세션 + 요약 주입 | Claude Code 세션 파일이 무한히 커지는 것 방지 |
 | 시스템 프롬프트 | `--append-system-prompt-file`로 오케스트레이터 규칙 주입 (별도 문서) | Claude Code 기본 프롬프트는 코딩용이라 역할 재정의 필요 |
-| 툴 제한 | `--strict-mcp-config` + `--allowedTools` 화이트리스트(`mcp.json`에 넣은 봇마다 `mcp__<bot>__ask`·`mcp__<bot>__status` 두 개, 러너가 `mcp.json`과 함께 생성), 파일·셸·웹 툴은 명시적 차단 | 오케스트레이터가 서버 파일을 건드리면 안 됨. 권한 프롬프트가 헤드리스에서 멈추는 것 방지 |
+| 툴 제한 | `--strict-mcp-config` + `--allowedTools` 화이트리스트(`mcp.json`에 넣은 봇마다 `mcp__<bot>__ask`·`mcp__<bot>__status` 두 개, 러너가 `mcp.json`과 함께 생성) + `WebSearch`. 파일·셸·웹 페이지 열기(`WebFetch`)는 명시적 차단 | 오케스트레이터가 서버 파일을 건드리면 안 됨. 권한 프롬프트가 헤드리스에서 멈추는 것 방지. 웹 검색은 2026-11-18 사용자 요청으로 허용 — 결과 요약만 받아 페이지 본문을 통한 지시 주입 면이 좁고, 검색어는 `claude.note`로 화면에 보인다 |
 | 턴 상한 | 두지 않음(2026-11-16 개정, 처음엔 `--max-turns 12`). `RUNNER_MAX_TURNS`>0 이면 다시 켜진다 | 12는 정당한 게임·토론(4봇×4바퀴)을 정리 없이 끊었다. 긴 맥락은 Claude Code 자동 압축, 폭주는 재시도 금지·어댑터 cooldown·600초 타임아웃이 막는다 |
 | 모델 | 기본 `sonnet`, 토론·복잡 비교만 `opus` 선택 가능 | 오케스트레이션은 판단 위주라 Sonnet으로 충분. 비용은 구독 한도 |
 | 작업 디렉터리 | 빈 전용 디렉터리, `CLAUDE.md` 없음 | 프로젝트 지시가 섞이지 않게 |
@@ -84,6 +85,7 @@ claude -p "<사용자 메시지>" \
 | `system` (init, session\_id) | `run.started` {claude\_session\_id} | 헤더 "실행 중". session\_id 저장 |
 | `assistant` 안 `tool_use` (`mcp__vooy__ask`) | `bot.pending` {bot: vooy} | "Vooy 응답 중…" 말풍선 자리 |
 | `assistant` 안 `tool_use` (`mcp__<bot>__status`) | 없음 | 표시하지 않음 (`tool_call`에만 기록) |
+| `assistant` 안 `tool_use` (`WebSearch`) | `claude.note` "웹 검색: <검색어>" | Claude 말풍선. 검색 결과는 표시·기록하지 않음 |
 | `user` 안 `tool_result` (`ask`) | `bot.reply` {bot, raw, structured} | 봇 말풍선 (원문) |
 | `assistant` 안 `text` (중간) | `claude.note` | Claude 말풍선 ("Vooy 답을 뮤즈에 넘깁니다") |
 | `result` (최종) | `claude.final` + `usage`, 이어서 `run.finished` {status: done} | Claude 정리 말풍선, 세션 통계 갱신 |
