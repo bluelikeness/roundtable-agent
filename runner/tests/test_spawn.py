@@ -41,13 +41,13 @@ async def test_first_run_args_and_events(settings, claude_log, monkeypatch):
     for flag, value in [
         ("--output-format", "stream-json"),
         ("--model", "sonnet"),
-        ("--disallowedTools", "Bash,Read,Write,Edit,WebSearch,WebFetch"),
-        ("--allowedTools", "mcp__mock-a__ask,mcp__mock-a__status,mcp__mock-b__ask,mcp__mock-b__status"),
+        ("--disallowedTools", "Bash,Read,Write,Edit,WebFetch"),
+        ("--allowedTools", "mcp__mock-a__ask,mcp__mock-a__status,mcp__mock-b__ask,mcp__mock-b__status,WebSearch"),
     ]:
         assert argv[argv.index(flag) + 1] == value
     assert "--verbose" in argv and "--strict-mcp-config" in argv
     assert "--max-turns" not in argv  # 턴 상한 없음이 기본
-    assert argv[argv.index("--tools") + 1] == ""  # 내장 툴 없음
+    assert argv[argv.index("--tools") + 1] == "WebSearch"  # 내장 툴은 웹 검색만
     assert json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True}
     assert call["tool_search"] == "false"
     assert set(call["mcp"]["mcpServers"]) == {"mock-a", "mock-b"}
@@ -60,6 +60,15 @@ async def test_first_run_args_and_events(settings, claude_log, monkeypatch):
     assert call["cwd"] == str(settings.work_dir)
     # 실행별 디렉터리는 끝나면 지운다
     assert not (settings.runs_dir / str(session.run_id)).exists()
+
+
+async def test_web_tools_empty_means_no_builtin_tools(settings, claude_log, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_SCRIPT", str(FIXTURES / "fanout.jsonl"))
+    settings.web_tools = ""
+    await _run(ClaudeCodeRunner(settings), make_session())
+    argv = _calls(claude_log)[0]["argv"]
+    assert argv[argv.index("--tools") + 1] == ""
+    assert "WebSearch" not in argv[argv.index("--allowedTools") + 1]
 
 
 async def test_resume_passes_session_id(settings, claude_log, monkeypatch):

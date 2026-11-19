@@ -148,6 +148,20 @@ def test_garbage_and_unknown_lines_ignored():
     assert p.feed(bash) == []
 
 
+def test_web_search_shows_query_as_note():
+    p = _parser()
+    p.feed('{"type":"system","subtype":"init","session_id":"s"}')
+    out = p.feed(
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"최신 소식을 찾아봅니다."},'
+        '{"type":"tool_use","id":"w1","name":"WebSearch","input":{"query":"서울 내일 날씨"}}]}}'
+    )
+    assert [e.type for e in out] == ["claude.note", "claude.note"]
+    assert out[1].payload.text == "웹 검색: 서울 내일 날씨"
+    # 검색 결과는 봇 답이 아니므로 이벤트가 없다
+    res = '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"결과"}]}}'
+    assert p.feed(res) == []
+
+
 def test_unparseable_ask_result_is_internal_error():
     p = _parser()
     p.feed('{"type":"system","subtype":"init","session_id":"s"}')
