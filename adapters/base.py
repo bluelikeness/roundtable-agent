@@ -186,6 +186,12 @@ class BotTimeout(AdapterError):
     code = "timeout"
 
 
+class SendLost(AdapterError):
+    """보낸 질문이 대화에 없다(전송이 안 됨). _collect 가 던지면 베이스가 한 번 다시 보낸다."""
+
+    code = "unavailable"
+
+
 # ---------------------------------------------------------------------------
 # 설정 (adapters/<bot>/config.yaml, 비밀값은 env)
 # ---------------------------------------------------------------------------
@@ -254,6 +260,8 @@ class BotAdapter(ABC):
     question_patterns: list[str] = []
     min_interval_s: float = 1.0
     poll_s: float = 0.25  # _collect 호출 간격
+    # 답이 없으면 남은 시간의 절반에 같은 질문을 무조건 다시 보낸다. 끄면 _collect 가 SendLost 를 던질 때만 보낸다
+    blind_resend: bool = True
 
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = ""):
         self.config = config
@@ -282,6 +290,7 @@ class BotAdapter(ABC):
         self._lock = asyncio.Lock()
         self._waiting = 0
         self._last_send_mono = 0.0
+        self._last_change_at = 0.0  # _wait_reply 가 마지막으로 화면(메시지) 변화를 본 시각
         self._started_mono = time.monotonic()
         self.enabled = True
         self._login_required = False
@@ -446,14 +455,22 @@ class BotAdapter(ABC):
                 raise BotTimeout("sending 단계 시간 초과") from None
             self._last_send_mono = time.monotonic()
 
-            # waiting: 1회차는 잔여 시간의 절반까지. 무응답이면 같은 text 를 한 번 더 보낸다
+            # waiting: blind_resend 면 1회차는 잔여 시간의 절반까지, 무응답이면 같은 text 를 한 번 더 보낸다.
+            # 아니면 끝까지 기다리고, _collect 가 "보낸 질문이 없음"(SendLost)을 알릴 때만 다시 보낸다
             remaining = deadline - time.monotonic()
-            first_until = deadline if no_retry else time.monotonic() + remaining / 2
-            msgs, saw_any = await self._wait_reply(thread, first_until)
+            blind = self.blind_resend and not no_retry
+            first_until = time.monotonic() + remaining / 2 if blind else deadline
+            lost = False
+            try:
+                msgs, saw_any = await self._wait_reply(thread, first_until)
+            except SendLost:
+                if no_retry:
+                    raise
+                msgs, saw_any, lost = [], False, True
             if not msgs and saw_any:
                 # 진행 메시지는 왔다: 재전송하지 않고 남은 시간 동안 계속 기다린다
                 msgs, _ = await self._wait_reply(thread, deadline)
-            elif not msgs and not no_retry:
+            elif not msgs and not no_retry and (blind or lost):
                 record["retried"] = True
                 async with asyncio.timeout(max(0.0, min(self.send_s, deadline - time.monotonic()))):
                     await self._send(thread, body, tap)
@@ -461,6 +478,7 @@ class BotAdapter(ABC):
                 msgs, _ = await self._wait_reply(thread, deadline)
             if not msgs:
                 raise BotTimeout("응답 없음")
+            self._answered()
 
             raw, structured = await self._extract(msgs)
         except AdapterError as e:
@@ -494,6 +512,13 @@ class BotAdapter(ABC):
             message_ids=[m.id for m in msgs],
         )
 
+    def reply_quiet_s(self) -> float:
+        """응답이 끝났다고 보는 침묵 시간. 끝을 알리는 신호가 있는 경로는 짧게 줄일 수 있다."""
+        return self.quiet_s
+
+    def _answered(self) -> None:
+        """답을 다 받았을 때(추출 전). 응답 시간 학습 등에 쓴다."""
+
     def _is_progress(self, msg: RawMessage) -> bool:
         return any(r.search(msg.text) for r in self._progress_re)
 
@@ -509,10 +534,11 @@ class BotAdapter(ABC):
             sig = tuple((m.id, m.text) for m in msgs)
             if sig != last_sig:
                 last_sig, last_change = sig, time.monotonic()
+                self._last_change_at = last_change
             saw_any = saw_any or bool(msgs)
             real = [m for m in msgs if not self._is_progress(m)]
             now = time.monotonic()
-            if real and now - last_change >= self.quiet_s and not await self._is_typing(thread):
+            if real and now - last_change >= self.reply_quiet_s() and not await self._is_typing(thread):
                 return real, saw_any
             if now >= until:
                 # 시간이 다 됐으면 받은 만큼이라도 돌려준다

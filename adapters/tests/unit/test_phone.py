@@ -242,6 +242,7 @@ async def vooy_phone(stack, tmp_path, monkeypatch):
     a.device.IDLE_RELEASE_S = 0.3
     a.poll_s = 0.05
     a.android.app_start_wait_s = 1
+    a.android.home_after_use = True  # 알림 경로를 시험한다(기본값은 앱을 그대로 둔다)
     a.SEND_SETTLE_S = 0
     a.SEND_CHECK_S = 0.05
     a.SEND_CONFIRM_S = 0.3
@@ -283,6 +284,7 @@ async def test_vooy_over_phone_fast_reply_before_home(vooy_phone):
     a, _, phone = vooy_phone
     phone.vooy.latency = 0.0
     a.android.notify_fallback_s = 60
+    a.sel.pop("send_u2", None)  # 화면을 읽어 전송을 확인하는 경로(빠른 보내기는 누른 뒤 화면을 보지 않는다)
     res = await a.ask("빠른 답", "t1", timeout_s=120)  # 대기 끝 근처 규칙(10초)에 걸리지 않게 길게
     assert res.ok and res.raw == "echo: 빠른 답"
     assert res.latency_ms < 15_000
@@ -298,6 +300,7 @@ def _chat_adapter(bot: str, base: str, tmp_path) -> PhoneChatAdapter:
     a.device.IDLE_RELEASE_S = 0.3
     a.poll_s = 0.05
     a.android.app_start_wait_s = 1
+    a.android.home_after_use = True  # 알림 경로를 시험한다(기본값은 앱을 그대로 둔다)
     a.SEND_SETTLE_S = 0
     a.SEND_CHECK_S = 0.05
     return a
@@ -498,7 +501,7 @@ async def test_wakes_screen_without_secure_lock_and_turns_it_off_after(vooy_phon
     assert res.ok and res.raw == "echo: 오늘 날씨", res
     assert "wake" in phone.handled
     for _ in range(40):
-        if phone.screen_offs:
+        if phone.screen_offs and not phone.screen:  # 보낸 뒤 한 번 꺼졌다가 읽을 때 다시 켜질 수 있다
             break
         await asyncio.sleep(0.1)
     assert phone.screen_offs >= 1 and not phone.screen  # 우리가 켠 화면은 다 쓴 뒤 끈다
@@ -847,3 +850,130 @@ def test_chat_room_name_from_env(tmp_path, monkeypatch):
     assert sel["clickable"] is True
     assert re.search(sel["desc_re"], "my.agent\n설명") and re.search(sel["desc_re"], "my.agent")
     assert not re.search(sel["desc_re"], "myXagent") and not re.search(sel["desc_re"], "my.agent2")
+
+
+async def test_phone_does_not_resend_blindly_when_question_was_sent(stack, tmp_path, monkeypatch):
+    """알림이 없어도 확인 시점에 보낸 질문이 화면에 있으면 다시 보내지 않고 답을 기다린다(절반 시점 무조건 재전송 없음)."""
+    base, _, phone = stack
+    monkeypatch.setenv("ANDROID_DEVICE_FACTORY", "")
+    a = _chat_adapter("pickle", base, tmp_path)
+    app = phone.chats["com.pickle.client"]
+    app.notify = None  # 알림을 안 보내는 앱
+    app.latency = 8.0  # 생각이 길다: 예전 규칙이면 절반(약 6초) 시점에 다시 보낸다
+    a.android.expect_reply_s, a.android.verify_margin_s = 0.5, 0
+    try:
+        res = await a.ask("긴 생각", "t1", timeout_s=12)
+        assert res.ok and res.raw == "echo: 긴 생각", res
+        assert [m.text for m in app.messages if m.role == "own"] == ["긴 생각"]
+        assert not any(r.get("retried") for r in a.logs)
+    finally:
+        await a.device.aclose()
+
+
+async def test_phone_resends_only_when_question_is_missing(stack, tmp_path, monkeypatch):
+    """빠른 보내기: 전송이 확인 안 돼도 다시 누르지 않고 떠난다. 확인 시점에 질문이 없고 화면이 그대로면 한 번 다시 보낸다."""
+    base, _, phone = stack
+    monkeypatch.setenv("ANDROID_DEVICE_FACTORY", "")
+    a = _chat_adapter("pickle", base, tmp_path)
+    app = phone.chats["com.pickle.client"]
+    app.notify = None
+    app.drop_sends = 1  # 첫 전송은 눌러도 안 간다
+    a.android.expect_reply_s, a.android.verify_margin_s = 0.5, 0
+    try:
+        res = await a.ask("안 간 질문", "t1", timeout_s=30)
+        assert res.ok and res.raw == "echo: 안 간 질문", res
+        assert [m.text for m in app.messages if m.role == "own"] == ["안 간 질문"]
+        assert any(r.get("retried") for r in a.logs)
+    finally:
+        await a.device.aclose()
+
+
+def test_verify_time_learns_from_reply_notifications(tmp_path):
+    a = _bot_adapter("pickle", tmp_path)
+    a.android.expect_reply_s, a.android.verify_margin_s, a.android.notify_fallback_s = 30, 10, 60
+    assert a.verify_after_s() == 40
+    for s in (12, 20, 14):
+        a._note_reply_time(s)
+    assert a.verify_after_s() == 24  # 중간값 14 + 10
+    # 다시 만들어도 기록이 남는다
+    b = _bot_adapter("pickle", tmp_path)
+    assert list(b._reply_times) == [12, 20, 14]
+    a.android.notify_fallback_s = 20
+    assert a.verify_after_s() == 20  # 상한
+
+
+def test_reply_time_learning_shrinks_when_answer_was_already_done(tmp_path):
+    """알림 없는 앱: 처음 열었을 때 답이 이미 끝나 있었으면 0.75배로 적어 다음엔 일찍 열어 본다."""
+
+    class Phone:
+        wait_notification = None
+
+    a = _bot_adapter("pickle", tmp_path)
+    a.device = Phone()
+    a._sent_at = 100.0
+    a._first_read_at = 130.0
+    a._last_change_at = 130.5  # 처음 본 뒤 바뀌지 않았다 = 이미 끝나 있었다
+    a._answered()
+    a._first_read_at = 110.0
+    a._last_change_at = 125.0  # 읽는 동안 답이 이어졌다 = 실제로 끝난 시각
+    a._answered()
+    assert list(a._reply_times) == [22.9, 25.0]  # 30.5 × 0.75, 25
+
+
+async def test_lease_send_goes_before_read_and_reader_yields():
+    """보내기가 읽기보다 먼저 화면을 받는다. 읽는 중인 봇은 보내려는 봇이 있으면 화면을 넘긴다."""
+    from adapters.phone.gateway import Leases
+
+    ls = Leases()
+    reader = await ls.acquire("pickle", 1, 30, "read")
+    assert reader is not None
+    assert not await ls.yield_to_send(reader.id)  # 기다리는 보내기가 없으면 계속 읽는다
+    assert not await ls.yield_to_send(reader.id, any_waiting=True)  # 아무도 안 기다린다
+
+    order: list[str] = []
+
+    async def take(holder: str, priority: str) -> None:
+        got = await ls.acquire(holder, 5, 30, priority)
+        order.append(holder)
+        await asyncio.sleep(0.05)
+        await ls.release(got.id)
+
+    late_read = asyncio.create_task(take("vooy-read", "read"))
+    await asyncio.sleep(0.05)
+    send = asyncio.create_task(take("cue-send", "send"))
+    await asyncio.sleep(0.05)
+    assert await ls.yield_to_send(reader.id)  # 보내기가 기다린다 → 넘긴다
+    await asyncio.gather(late_read, send)
+    assert order == ["cue-send", "vooy-read"]  # 먼저 와서 기다린 읽기보다 보내기가 먼저
+
+
+async def test_lease_reader_without_reply_yields_to_other_reader():
+    """아직 답이 없는(생각 중인) 봇은 읽으려고 기다리는 다른 봇에게 화면을 넘긴다. 답이 들어오는 중이면 넘기지 않는다."""
+    from adapters.phone.gateway import Leases
+
+    ls = Leases()
+    a = await ls.acquire("vooy", 1, 30, "read")
+    other = asyncio.create_task(ls.acquire("cue", 5, 30, "read"))
+    await asyncio.sleep(0.05)
+    assert not await ls.yield_to_send(a.id)  # 답이 들어오는 중: 보내기 대기만 본다
+    assert await ls.yield_to_send(a.id, any_waiting=True)  # 생각 중: 넘긴다
+    got = await other
+    assert got is not None and ls.current.holder == "cue"
+
+
+async def test_default_stays_in_app_without_home(stack, tmp_path, monkeypatch):
+    """기본값: 보내기·읽기 뒤 홈 버튼을 누르지 않는다(홈 직후 5초 동안 다른 앱 띄우기가 늦어진다). 알림이 없어도
+    확인 시점에 화면을 읽어 답을 받는다."""
+    base, _, phone = stack
+    monkeypatch.setenv("ANDROID_DEVICE_FACTORY", "")
+    a = _chat_adapter("pickle", base, tmp_path)
+    a.android.home_after_use = False
+    a.android.expect_reply_s, a.android.verify_margin_s = 0.5, 0
+    try:
+        homes = phone.handled.count("global")
+        res = await a.ask("홈 없이", "t1", timeout_s=30)
+        assert res.ok and res.raw == "echo: 홈 없이", res
+        assert phone.handled.count("global") == homes  # 홈(global) 명령 없음
+        assert phone._fg_pkg() == "com.pickle.client"
+    finally:
+        await a.device.aclose()

@@ -92,6 +92,7 @@ class FakeChatApp:
         self.focused = False
         self._icons: list[tuple[tuple[int, int, int, int], str]] = []
         self.voice_entered = 0  # 마이크를 누른 횟수(음성 모드). 어댑터가 절대 누르면 안 된다
+        self.drop_sends = 0  # 이 횟수만큼 전송 버튼을 눌러도 보내지지 않는다(글은 입력창에 남음)
         self._targets: list[tuple[tuple[int, int, int, int], Callable[[], None]]] = []
         # 가짜 휴대폰이 꽂는다: (채널, posted?) 알림을 올린다
         self.notify: Callable[[str, str, bool], None] | None = None
@@ -169,6 +170,9 @@ class FakeChatApp:
             self.notify(channel, key, posted)
 
     def _send(self) -> None:
+        if self.drop_sends > 0 and self.input.strip():
+            self.drop_sends -= 1
+            return
         text = self.input.strip()
         self.input = ""
         if not text:

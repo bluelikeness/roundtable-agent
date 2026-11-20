@@ -18,11 +18,14 @@ import asyncio
 import contextlib
 import importlib
 import io
+import json
 import logging
 import os
 import re
+import statistics
 import time
 import xml.etree.ElementTree as ET
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Protocol
@@ -30,7 +33,7 @@ from typing import Any, Iterator, Protocol
 import yaml
 from pydantic import BaseModel, Field
 
-from adapters.base import AdapterConfig, BackendDown, BotAdapter
+from adapters.base import AdapterConfig, BackendDown, BotAdapter, SendLost
 
 log = logging.getLogger("adapters.android")
 
@@ -307,8 +310,21 @@ class AndroidConfig(BaseModel):
     vnc_url: str = ""
     # 하루 전송 상한(03 7장 레이트 리밋). 0 이면 끈다
     daily_limit: int = 300
-    # 휴대폰 경로(PhoneDevice): 답 알림이 이만큼 안 오면 화면을 직접 읽기 시작한다
+    # 휴대폰 경로(PhoneDevice): 보낸 뒤 "평소 응답 시간 + verify_margin_s" 동안 답 알림이 없으면 앱을 열어
+    # 보낸 질문이 있는지 보고 화면을 직접 읽기 시작한다. 평소 응답 시간은 최근 답 10개가 끝난 시각의 중간값
+    # (없으면 expect_reply_s). notify_fallback_s 는 그 확인 시점의 상한.
+    # 2026-11-21 노트9 측정: 방금 앱을 쓴 뒤에는 뮤즈만 답 알림을 보냈다(Vooy·피클·Cue 는 150초 동안 없음).
+    # 알림을 안 보내는 앱은 verify_margin_s 를 0 으로 둬 평소 응답 시간에 바로 읽는다
     notify_fallback_s: float = 60
+    expect_reply_s: float = 30
+    verify_margin_s: float = 10
+    # 답 알림으로 읽기 시작했으면 앱이 답을 다 쓴 뒤다(뮤즈: 작업 중 알림이 사라진 뒤 답 알림 1번). 화면은 이만큼만
+    # 조용하면 끝으로 본다(quiet_s 보다 길면 quiet_s)
+    notified_quiet_s: float = 2.0
+    # 보내기·읽기 뒤 홈으로 나갈지. 안드로이드는 홈 버튼 직후 5초 동안 다른 앱 띄우기를 늦춘다(앱 전환 보호.
+    # 2026-11-21 노트9: 홈 뒤 띄우기 4~5초, 앱에서 앱으로는 0.7초). 그래서 기본은 앱을 그대로 두고 화면만 놓는다.
+    # 그 앱이 앞에 있는 동안은 답 알림이 안 오지만, 다른 봇이 자기 앱을 띄우면 뒤로 가 알림이 온다. 전용 폰 기준
+    home_after_use: bool = False
     # "작업 중" 알림 채널(뮤즈 aura_run_in_background). 답 신호로 치지 않고, 떠 있는 동안 응답 중으로 본다
     progress_channels: list[str] = []
 
@@ -345,46 +361,111 @@ class AndroidAdapter(BotAdapter):
         self._notif_cursor = 0
         self._signaled = True
         self._fallback_at = 0.0
+        self._verifying = False  # 알림 없이 확인 시점이 돼 화면을 처음 여는 중(보낸 질문이 있는지 본다)
+        self._by_notification = False  # 이번 읽기가 답 알림으로 시작됐는가
+        self._first_read_at = 0.0  # 보낸 뒤 처음 화면을 읽으러 간 시각
+        self._sent_at = 0.0
         self._progress_keys: set[str] = set()
+        self._reply_times_path = self.state_dir / "reply_times.json"
+        self._reply_times: deque[float] = deque(self._load_reply_times(), maxlen=10)
+
+    @property
+    def blind_resend(self) -> bool:  # type: ignore[override]
+        """휴대폰은 절반 시점에 무조건 다시 보내지 않는다(긴 생각에 같은 질문이 두 번 간다). 확인 시점에 보낸
+        질문이 화면에 없을 때만(SendLost) 다시 보낸다. 에뮬레이터는 예전대로."""
+        return not self.phone_mode
+
+    def _load_reply_times(self) -> list[float]:
+        try:
+            data = json.loads(self._reply_times_path.read_text(encoding="utf-8"))
+            return [float(x) for x in data][-10:]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def _note_reply_time(self, seconds: float) -> None:
+        self._reply_times.append(round(seconds, 1))
+        with contextlib.suppress(OSError):
+            self._reply_times_path.write_text(json.dumps(list(self._reply_times)), encoding="utf-8")
+
+    def reply_quiet_s(self) -> float:
+        if self.phone_mode and self._by_notification:
+            return min(self.quiet_s, self.android.notified_quiet_s)
+        return self.quiet_s
+
+    def _answered(self) -> None:
+        """휴대폰: 보낸 뒤 답이 끝나기까지 걸린 시간을 기록한다(확인 시점 학습).
+
+        알림을 안 보내는 앱은 화면을 처음 연 뒤에야 답을 본다. 그때 답이 이미 끝나 있었으면(처음 본 뒤 바뀌지 않음)
+        실제로는 더 일찍 끝났을 수 있으니 0.75배로 적어 다음엔 조금 일찍 열어 본다. 늦게 열면 학습이 줄지 않는다.
+        """
+        if not self.phone_mode or not self._sent_at:
+            return
+        took = self._last_change_at - self._sent_at
+        if self._first_read_at and self._last_change_at <= self._first_read_at + 2.0:
+            took *= 0.75
+        self._note_reply_time(max(1.0, took))
+
+    def verify_after_s(self) -> float:
+        """보낸 뒤 알림 없이 앱을 열어 확인하기까지의 시간."""
+        a = self.android
+        expect = statistics.median(self._reply_times) if self._reply_times else a.expect_reply_s
+        return min(a.notify_fallback_s, expect + a.verify_margin_s)
 
     @property
     def phone_mode(self) -> bool:
         """기기가 휴대폰 워커(PhoneDevice)인지. 알림으로 답을 기다리고, 기다리는 동안 화면을 놓는다."""
         return hasattr(self.device, "wait_notification")
 
-    def screen(self):
-        """휴대폰: 화면을 쓰는 한 묶음(보내기, 읽기)을 다른 봇과 섞이지 않게 잡는다. 에뮬레이터는 아무 일 없음."""
-        return self.device.hold() if self.phone_mode else contextlib.nullcontext()
+    def screen(self, priority: str = "send"):
+        """휴대폰: 화면을 쓰는 한 묶음(보내기, 읽기)을 다른 봇과 섞이지 않게 잡는다. 에뮬레이터는 아무 일 없음.
+
+        읽기는 priority="read": 다른 봇이 보내려고 기다리면 그쪽이 먼저 화면을 받는다."""
+        return self.device.hold(priority) if self.phone_mode else contextlib.nullcontext()
+
+    async def yield_screen(self, has_reply: bool) -> None:
+        """휴대폰: 한 번 읽은 뒤 화면을 넘길지. 보내려는 봇이 있으면 늘 넘긴다. 아직 답이 없으면(생각 중) 읽으려고
+        기다리는 봇에게도 넘긴다. 답이 들어오는 중이면 끝까지 잡아 빨리 끝낸다."""
+        if self.phone_mode and hasattr(self.device, "yield_screen"):
+            await self.device.yield_screen(to_any=not has_reply)
 
     # --- 휴대폰 경로: 보내기 → 홈 → 알림 → 읽기 (docs/proposals/phone-worker.md 6장) ---
 
     async def before_send(self) -> None:
         """보내기 직전의 알림 커서. 보낸 직후 온 알림도 놓치지 않게 먼저 잡는다."""
         if self.phone_mode:
+            self._send_started = time.monotonic()
             self._notif_cursor = await self.device.events_cursor()
             self._progress_keys = set()
 
     async def after_send(self, already_replied: bool = False) -> None:
-        """보낸 뒤 홈으로 나가 화면을 놓는다. 앱이 전경이면 답 알림이 오지 않는다.
+        """보낸 뒤 화면을 놓는다(home_after_use 면 홈으로 나간 뒤). 앱이 전경인 동안은 답 알림이 오지 않는다.
 
         already_replied: 나가기 전에 이미 답이 화면에 있으면(빠른 봇) 알림을 기다리지 않고 바로 읽는다.
         """
         if not self.phone_mode:
             return
+        self._verifying = False
+        self._by_notification = False
+        self._sent_at = time.monotonic()
+        self._first_read_at = self._sent_at if already_replied else 0.0
+        log.info("보냄: 화면을 잡고 %.1f초, %s", self._sent_at - getattr(self, "_send_started", self._sent_at),
+                 "답이 이미 보임 → 바로 읽음" if already_replied else f"{self.verify_after_s():.0f}초 뒤 확인")
         if already_replied:
             self._signaled = True
             await self.device.release()
             return
         self._signaled = False
-        self._fallback_at = time.monotonic() + self.android.notify_fallback_s
-        await self.device.press("home")
+        self._fallback_at = self._sent_at + self.verify_after_s()
+        if self.android.home_after_use:
+            await self.device.press("home")
         await self.device.release()
 
     async def reply_signal(self, deadline: float) -> bool:
         """답을 읽으러 화면을 열어도 되는지. 에뮬레이터는 늘 True(화면을 계속 본다).
 
-        휴대폰은 대상 앱의 답 알림이 오면 True. 알림이 notify_fallback_s 동안 없거나 이번 대기의
-        끝이 가까우면(재전송 전에 한 번은 화면을 본다) 화면을 직접 읽는다.
+        휴대폰은 대상 앱의 답 알림이 오면 True. 알림이 확인 시점(verify_after_s)까지 없으면 화면을 직접 읽기
+        시작하고, 그 첫 화면에서 보낸 질문이 있는지 본다(check_sent). 이번 대기의 끝이 가까워도 읽는다.
+        "작업 중" 알림(뮤즈)이 떠 있으면 보내기는 된 것이라 확인 시점을 미룬다.
         """
         if not self.phone_mode or self._signaled:
             return True
@@ -393,12 +474,34 @@ class AndroidAdapter(BotAdapter):
         posted = self._absorb(*await self.device.wait_events(self.android.package, self._notif_cursor, wait))
         now = time.monotonic()
         if posted:
-            log.info("답 알림 %d개 → 화면 읽기", len(posted))
+            log.info("답 알림 %d개 → 화면 읽기 (보낸 뒤 %.1f초)", len(posted), now - self._sent_at)
             self._signaled = True
-        elif now >= self._fallback_at or deadline - now <= max(10.0, self.quiet_s * 3):
-            log.info("답 알림 없음 → 화면을 직접 읽음")
+            self._by_notification = True
+            self._first_read_at = now
+        elif deadline - now <= max(10.0, self.quiet_s * 3):
+            log.info("답 알림 없음, 대기 끝이 가까움 → 화면을 직접 읽음")
             self._signaled = True
+            self._first_read_at = now
+        elif now >= self._fallback_at and not self._progress_keys:
+            log.info("답 알림 없음 (보낸 뒤 %.1f초) → 앱을 열어 보낸 질문 확인", now - self._sent_at)
+            self._signaled = True
+            self._verifying = True
+            self._first_read_at = now
         return self._signaled
+
+    def check_sent(self, has_own: bool, changed: bool) -> None:
+        """확인 시점에 처음 연 화면의 판정. 보낸 질문이 없고 화면도 보내기 전 그대로면 전송이 안 된 것(SendLost).
+
+        화면이 바뀌었으면(긴 답에 질문이 밀려 올라갔을 수 있다) 다시 보내지 않는다. 같은 질문이 두 번 가는 것보다
+        늦는 편이 낫다. 질문이 있으면 생각 중이니 화면을 계속 읽는다(알림을 안 보내는 앱이 있어 홈으로 나가지 않는다).
+        """
+        if not self._verifying:
+            return
+        self._verifying = False
+        if has_own or changed:
+            log.info("확인: 보낸 질문 %s, 화면 변화 %s → 계속 읽음", "있음" if has_own else "없음", "있음" if changed else "없음")
+            return
+        raise SendLost("보낸 질문이 대화에 없음(전송 안 됨)")
 
     def _absorb(self, events: list[dict[str, Any]], cursor: int) -> list[dict[str, Any]]:
         """알림 이벤트를 반영하고 답 신호가 되는 posted 이벤트만 돌려준다."""
@@ -430,9 +533,10 @@ class AndroidAdapter(BotAdapter):
             await asyncio.sleep(1.0)
 
     async def after_read(self) -> None:
-        """휴대폰: 다 읽었으면 홈으로 나가 화면을 놓는다."""
+        """휴대폰: 다 읽었으면 화면을 놓는다(home_after_use 면 홈으로 나간 뒤)."""
         if self.phone_mode:
-            await self.device.press("home")
+            if self.android.home_after_use:
+                await self.device.press("home")
             await self.device.release()
 
     # --- 기기 상태 ---------------------------------------------------------

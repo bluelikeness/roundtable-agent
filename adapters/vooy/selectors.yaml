@@ -8,6 +8,8 @@
 input: {desc_re: '^(Message|메시지 입력)$'}
 input_u2: {descriptionMatches: '^(Message|메시지 입력)$'}
 send: {desc_re: '^(Send message|메시지 전송)$'}
+# 휴대폰 빠른 보내기: 화면을 다시 읽지 않고 접근성 클릭(노트9 는 글을 넣은 뒤 트리 읽기가 7초씩 걸린다)
+send_u2: {descriptionMatches: '^(Send message|메시지 전송)$'}
 # 하단 탭의 에이전트 대화방. 대화방이 아닌 화면이면 이 탭을 누른다
 home_tab: {rid: android-gnb-home}
 # 대화 목록 ScrollView. 버튼·이미지는 이 안에서만 찾는다

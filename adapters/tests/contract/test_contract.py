@@ -50,6 +50,7 @@ async def test_ask_ok(target: Target):
 
 
 async def test_ask_timeout_retries_once_then_fails(target: Target):
+    """에뮬레이터·웹: 절반 시점에 한 번 다시 보낸다. 휴대폰: 보낸 질문이 화면에 있으면 다시 보내지 않는다."""
     thread = tid("timeout")
     t0 = time.monotonic()
     r = await ask(target, target.driver.slow_text("천천히 답해"), thread, timeout_s=10)
@@ -60,7 +61,9 @@ async def test_ask_timeout_retries_once_then_fails(target: Target):
     # ask 한 번은 큐·재시도를 포함해 timeout_s 를 넘지 않는다 (HTTP 왕복 여유 1.5초)
     assert elapsed < 11.5
     assert r["latency_ms"] <= 10_500
-    assert (await last_log(target, thread)).get("retried") is True
+    # 휴대폰 경로: 질문은 갔고 답만 없다 → 다시 보내지 않는다(질문이 없을 때만 재전송, 03 4장)
+    phone = target.name.endswith("-phone")
+    assert bool((await last_log(target, thread)).get("retried")) is not phone
 
 
 async def test_ask_login_expired(target: Target):

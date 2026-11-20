@@ -72,11 +72,15 @@ class PhoneDevice:
 
     # --- 화면 임대 ---------------------------------------------------------
 
-    async def _ensure_lease(self) -> str:
+    async def _ensure_lease(self, priority: str = "send") -> str:
         async with self._lease_lock:
             if self._lease is not None:
                 return self._lease
-            r = await self._req("POST", "/lease", json={"holder": self.holder, "wait_s": self.lease_wait_s, "ttl_s": self.LEASE_TTL_S})
+            r = await self._req(
+                "POST",
+                "/lease",
+                json={"holder": self.holder, "wait_s": self.lease_wait_s, "ttl_s": self.LEASE_TTL_S, "priority": priority},
+            )
             if r.status_code != 200:
                 raise BackendDown(f"휴대폰 화면을 받지 못함: {_error(r)}")
             lease = r.json()["lease"]
@@ -88,6 +92,24 @@ class PhoneDevice:
                 raise
             self._lease = lease
             return self._lease
+
+    async def yield_screen(self, to_any: bool = False) -> None:
+        """읽는 중: 보내려고(to_any: 누구든) 기다리는 봇이 있으면 화면을 바로 넘긴다."""
+        if self._lease is None or self._held or self._busy:
+            return
+        async with self._lease_lock:
+            lease = self._lease
+            if lease is None:
+                return
+            try:
+                r = await self._req("POST", f"/lease/{lease}/yield", json={"to": "any" if to_any else "send"})
+            except BackendDown:
+                return
+            if r.status_code == 200 and r.json().get("released"):
+                self._lease = None
+                if self._idle_task is not None:
+                    self._idle_task.cancel()
+                    self._idle_task = None
 
     async def release(self) -> None:
         """화면 임대를 바로 돌려준다(알림을 기다리기 전 등)."""
@@ -115,11 +137,13 @@ class PhoneDevice:
         self._idle_task = asyncio.get_running_loop().create_task(later())
 
     @contextlib.asynccontextmanager
-    async def hold(self):
-        """여러 명령을 한 묶음으로 화면을 잡는다(앱 열기 → 읽기 사이에 다른 봇이 끼어들지 않게)."""
+    async def hold(self, priority: str = "send"):
+        """여러 명령을 한 묶음으로 화면을 잡는다(앱 열기 → 읽기 사이에 다른 봇이 끼어들지 않게).
+
+        priority: send | read. 읽기는 보내려고 기다리는 봇이 있으면 뒤로 밀린다(게이트웨이 임대 순서)."""
         self._held += 1
         try:
-            await self._ensure_lease()
+            await self._ensure_lease(priority)
             yield
         finally:
             self._held -= 1
