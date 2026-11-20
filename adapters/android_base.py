@@ -532,6 +532,20 @@ class AndroidAdapter(BotAdapter):
         x, y = node.bounds.center
         await self.device.click(x, y)
 
+    async def tap_input(self, node: UiNode, u2_selector: dict[str, str]) -> None:
+        """입력창을 눌러 포커스를 준다. 휴대폰은 좌표 대신 노드를 접근성 클릭한다.
+
+        앱을 다시 열면 지난번 포커스가 남아 키보드가 조금 늦게 올라오고 입력줄이 위로 밀린다. 밀리기 전에 읽은
+        좌표를 누르면 키보드 자판을 누르게 된다(2026-11-20 노트9: Vooy·Cue 글 넣기가 매번 실패).
+        """
+        if self.phone_mode and hasattr(self.device, "click_selector"):
+            try:
+                await self.device.click_selector(self.scoped(u2_selector))
+                return
+            except Exception as e:  # noqa: BLE001 - 노드를 못 누르면 예전처럼 좌표로
+                log.info("입력창 노드 클릭 실패, 좌표로 누름: %s", e)
+        await self.tap(node)
+
     async def input_text(self, u2_selector: dict[str, str], text: str) -> None:
         """한글 입력. set_text 가 기본, 피클처럼 포커스 후 노드가 사라지는 앱은 send_keys."""
         if self.android.input_method == "send_keys":

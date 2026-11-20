@@ -730,6 +730,39 @@ def test_tablet_popup_only_own_app_window(tmp_path):
     assert a.scoped({"className": "x"}) == {"className": "x"}
 
 
+async def test_tap_input_clicks_node_not_stale_coordinates(tmp_path):
+    """2026-11-20 노트9: 앱을 다시 열면 키보드가 늦게 올라와 입력줄이 위로 밀린다. 밀리기 전 좌표를 누르면
+    자판을 누르므로, 휴대폰에서는 입력창을 이 앱으로 한정한 셀렉터로 접근성 클릭한다. 실패하면 좌표로."""
+    from adapters.android_base import parse_hierarchy
+
+    xml = ('<hierarchy><node class="android.widget.EditText" package="com.vooy.mobile" text="" '
+           'content-desc="메시지 입력" clickable="true" bounds="[155,1819][794,1911]"/></hierarchy>')
+    field = parse_hierarchy(xml).children[0]
+    calls: list = []
+
+    class Phone:
+        wait_notification = None
+        fail = False
+
+        async def click_selector(self, sel):
+            calls.append(("node", sel))
+            if self.fail:
+                raise RuntimeError("누를 노드를 찾지 못함")
+            return "action"
+
+        async def click(self, x, y):
+            calls.append(("xy", x, y))
+
+    a = _bot_adapter("vooy", tmp_path)
+    a.device = Phone()
+    await a.tap_input(field, {"descriptionMatches": "^메시지 입력$"})
+    assert calls == [("node", {"descriptionMatches": "^메시지 입력$", "packageName": "com.vooy.mobile"})]
+    calls.clear()
+    a.device.fail = True
+    await a.tap_input(field, {"descriptionMatches": "^메시지 입력$"})
+    assert [c[0] for c in calls] == ["node", "xy"] and calls[1][1:] == field.bounds.center
+
+
 async def test_cue_waits_for_row_to_grow_before_guessing(tmp_path, monkeypatch):
     """2026-11-18 탭 팝업 Cue: 글을 넣은 직후 트리는 아직 옛 마이크 하나뿐이다(화면에는 마이크가 밀리고 ↑ 가 생김).
     그 자리 그림이 바뀌었다고 옛 노드를 ↑ 로 고르지 않고, 버튼 줄이 늘 때까지 기다려 새 맨 오른쪽(↑)을 고른다."""

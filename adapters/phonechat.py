@@ -312,7 +312,8 @@ class PhoneChatAdapter(AndroidAdapter):
             if field is None:
                 raise BackendDown("입력창 없음")
             if self.sel.get("focus_input"):
-                await self.tap(field)  # 키보드가 뜨며 입력줄이 위로 옮겨진다. 옮겨진 뒤를 기준으로 삼는다
+                # 키보드가 뜨며 입력줄이 위로 옮겨진다. 옮겨진 뒤를 기준으로 삼는다
+                await self.tap_input(field, candidates(self.sel["input_u2"])[0])
                 await asyncio.sleep(self.FOCUS_SETTLE_S)
                 root = await self.tree()
                 field = find_first(root, self.sel["input"]) or field
@@ -404,7 +405,7 @@ class PhoneChatAdapter(AndroidAdapter):
                 if field.text.strip():
                     log.info("붙여넣기 전 입력창에 글이 남아 있음(%d자)", len(field.text))
                     return False
-                await self.tap(field)
+                await self.tap_input(field, candidates(self.sel["input_u2"])[0])
                 await asyncio.sleep(self.FOCUS_SETTLE_S + 0.5)  # 키보드가 뜨고 입력창이 포커스를 받을 때까지
                 try:
                     await self.device.send_keys(body)

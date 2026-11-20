@@ -210,7 +210,7 @@ class VooyAdapter(AndroidAdapter):
             field = root.find(**self.sel["input"])
             if field is None:
                 raise BackendDown("입력창 없음")
-            await self.tap(field)
+            await self.tap_input(field, self.sel["input_u2"])
             # 키보드가 올라오면 입력창이 위로 움직이지만 set_text 는 좌표가 아닌 셀렉터로 찾는다.
             # 화면을 다시 덤프하지 않는다(조회 한 번이 수 초라 sending 단계 시간을 다 쓴다)
             await self.input_text(self.sel["input_u2"], body)
