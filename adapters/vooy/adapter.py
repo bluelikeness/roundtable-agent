@@ -77,6 +77,7 @@ class VooyAdapter(AndroidAdapter):
     VERIFY_RECHECK_S = 1.5
     # _ensure_ready 의 덤프를 _send 가 다시 쓰는 최대 나이
     TREE_REUSE_S = 5.0
+    READY_REUSE_S = 1.0  # _ensure_ready: 앱을 띄우고 입력창을 기다리며 방금 읽은 화면을 그대로 쓴다
 
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = "", selectors_path: str | Path = SELECTORS):
         super().__init__(config, state_dir, token, selectors_path)
@@ -96,6 +97,13 @@ class VooyAdapter(AndroidAdapter):
         self._tree_cache: tuple[float, UiNode] | None = None
 
     # --- 화면 읽기 ---------------------------------------------------------
+
+    async def tree(self) -> UiNode:
+        # 모든 덤프를 캐시에 남긴다: wait_for 가 방금 읽은 화면을 _ensure_ready 가 다시 덤프하지 않게
+        # (노트9 Vooy: 덤프 한 번이 1.2~3초)
+        t = await super().tree()
+        self._tree_cache = (time.monotonic(), t)
+        return t
 
     async def _tree(self, max_age_s: float = 0.0) -> UiNode:
         now = time.monotonic()
@@ -134,10 +142,12 @@ class VooyAdapter(AndroidAdapter):
 
     async def _ensure_ready(self) -> None:
         await self.ensure_device()
-        if await self.ensure_foreground():
+        started = await self.ensure_foreground()
+        if started:
             await self.wait_for(self.android.app_start_wait_s, **self.sel["input"])
         for attempt in range(3):
-            root = await self._tree()
+            # 방금 띄우고 기다리며 읽은 화면만 다시 쓴다(앱이 이미 떠 있었으면 캐시는 지난 왕복의 화면일 수 있다)
+            root = await self._tree(max_age_s=self.READY_REUSE_S if attempt == 0 and started else 0.0)
             if self._is_login_screen(root):
                 raise LoginRequired("Vooy 로그인 화면")
             # 입력창만 보면 된다. 새 Vooy(2026-11-17 노트9)는 입력창이 비면 전송 버튼 대신 음성 버튼을 보이고,

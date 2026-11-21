@@ -296,17 +296,8 @@ final class Commands {
 
     private List<AccessibilityNodeInfo> appNodes() {
         List<AccessibilityNodeInfo> out = new ArrayList<>();
-        ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<>();
         // 루트는 한 번만 받는다: 창이 바뀌는 중(깨운 직후 등)에는 두 번째 호출이 null 일 수 있다(ArrayDeque 는 null 을 못 받음)
-        for (AccessibilityWindowInfo w : svc.getWindows()) {
-            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
-            AccessibilityNodeInfo root = w.getRoot();
-            if (root != null) q.add(root);
-        }
-        if (q.isEmpty()) {
-            AccessibilityNodeInfo root = svc.getRootInActiveWindow();
-            if (root != null) q.add(root);
-        }
+        ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<>(appRoots());
         while (!q.isEmpty() && out.size() < MAX_NODES) {
             AccessibilityNodeInfo n = q.poll();
             if (Build.VERSION.SDK_INT < 30) {
@@ -321,12 +312,79 @@ final class Commands {
         return out;
     }
 
-    /** 셀렉터로 찾은 노드에 접근성 클릭(ACTION_CLICK). React Native 버튼은 좌표 탭보다 확실하다. 안 되면 좌표 탭. */
-    private JSONObject click(JSONObject sel) throws Exception {
+    /** 셀렉터 글자(설명·글)의 낱말 후보. 'A', '^(A|B)$' 처럼 고정 글만이면 그 목록, 정규식이면 빈 목록. */
+    static List<String> literals(JSONObject sel) {
+        List<String> out = new ArrayList<>();
+        for (String k : new String[] {"description", "text"}) {
+            String v = sel.optString(k, "");
+            if (!v.isEmpty()) out.add(v);
+        }
+        for (String k : new String[] {"descriptionMatches", "textMatches"}) {
+            String v = sel.optString(k, "");
+            if (v.isEmpty()) continue;
+            if (v.startsWith("^")) v = v.substring(1);
+            if (v.endsWith("$")) v = v.substring(0, v.length() - 1);
+            if (v.startsWith("(") && v.endsWith(")")) v = v.substring(1, v.length() - 1);
+            if (v.isEmpty() || v.matches(".*[\\\\\\[\\](){}.*+?^$].*")) continue;  // 정규식 기호가 있으면 낱말을 알 수 없다
+            for (String alt : v.split("\\|")) if (!alt.isEmpty()) out.add(alt);
+        }
+        return out;
+    }
+
+    /**
+     * 셀렉터에 맞는 노드. 먼저 시스템 글자 검색(findAccessibilityNodeInfosByText: 앱 쪽에서 한 번에 찾는다)으로,
+     * 못 찾으면 트리 전체를 훑는다. 안드로이드 10 은 전체를 훑을 때 노드마다 refresh 해서 큰 트리(노트9 Vooy)는
+     * 한 번에 1~5초 걸렸다(2026-11-21: 입력창 누르기 1.0·글 넣기 1.7·전송 4.6초).
+     * preferEditable: 맞는 노드 중 글을 받을 수 있는 노드를 먼저(입력창).
+     */
+    private AccessibilityNodeInfo findTarget(JSONObject sel, boolean preferEditable) {
+        List<String> lits = literals(sel);
+        if (!lits.isEmpty()) {
+            AccessibilityNodeInfo first = null;
+            for (AccessibilityNodeInfo root : appRoots()) {
+                for (String lit : lits) {
+                    List<AccessibilityNodeInfo> hits;
+                    try {
+                        hits = root.findAccessibilityNodeInfosByText(lit);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (hits == null) continue;
+                    for (AccessibilityNodeInfo n : hits) {
+                        if (n == null || !matches(n, sel)) continue;
+                        if (!preferEditable || n.isEditable()) return n;
+                        if (first == null) first = n;
+                    }
+                }
+            }
+            if (first != null) return first;
+        }
         AccessibilityNodeInfo target = null;
         for (AccessibilityNodeInfo n : appNodes()) {
-            if (matches(n, sel)) { target = n; break; }
+            if (!matches(n, sel)) continue;
+            if (!preferEditable || n.isEditable()) return n;
+            if (target == null) target = n;
         }
+        return target;
+    }
+
+    private List<AccessibilityNodeInfo> appRoots() {
+        List<AccessibilityNodeInfo> out = new ArrayList<>();
+        for (AccessibilityWindowInfo w : svc.getWindows()) {
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root != null) out.add(root);
+        }
+        if (out.isEmpty()) {
+            AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+            if (root != null) out.add(root);
+        }
+        return out;
+    }
+
+    /** 셀렉터로 찾은 노드에 접근성 클릭(ACTION_CLICK). React Native 버튼은 좌표 탭보다 확실하다. 안 되면 좌표 탭. */
+    private JSONObject click(JSONObject sel) throws Exception {
+        AccessibilityNodeInfo target = findTarget(sel, false);
         if (target == null) throw new IllegalStateException("누를 노드를 찾지 못함");
         JSONObject o = new JSONObject();
         if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
@@ -363,12 +421,7 @@ final class Commands {
     }
 
     private JSONObject setText(JSONObject sel, String text) throws Exception {
-        AccessibilityNodeInfo target = null;
-        for (AccessibilityNodeInfo n : appNodes()) {
-            if (!matches(n, sel)) continue;
-            if (n.isEditable()) { target = n; break; }
-            if (target == null) target = n;
-        }
+        AccessibilityNodeInfo target = findTarget(sel, true);
         if (target == null) throw new IllegalStateException("입력창을 찾지 못함");
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);

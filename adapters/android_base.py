@@ -397,11 +397,15 @@ class AndroidAdapter(BotAdapter):
 
         알림을 안 보내는 앱은 화면을 처음 연 뒤에야 답을 본다. 그때 답이 이미 끝나 있었으면(처음 본 뒤 바뀌지 않음)
         실제로는 더 일찍 끝났을 수 있으니 0.75배로 적어 다음엔 조금 일찍 열어 본다. 늦게 열면 학습이 줄지 않는다.
+        확인 시점에 처음 열었으면 그 시각에는 여유(verify_margin_s)가 들어 있으므로 빼고 줄인다. 빼지 않으면
+        (학습값+여유)×0.75 가 학습값과 같아지는 30초(여유 10초)에서 더 줄지 않는다(2026-11-21 계약 테스트 뮤즈).
         """
         if not self.phone_mode or not self._sent_at:
             return
         took = self._last_change_at - self._sent_at
         if self._first_read_at and self._last_change_at <= self._first_read_at + 2.0:
+            if not self._by_notification:
+                took -= self.android.verify_margin_s
             took *= 0.75
         self._note_reply_time(max(1.0, took))
 
