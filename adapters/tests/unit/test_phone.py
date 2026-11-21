@@ -977,3 +977,33 @@ async def test_default_stays_in_app_without_home(stack, tmp_path, monkeypatch):
         assert phone._fg_pkg() == "com.pickle.client"
     finally:
         await a.device.aclose()
+
+
+@pytest.mark.parametrize(
+    ("bot", "status"),
+    [("pickle", "전송 대기"), ("pickle", "전송됨"), ("pickle", "Sent"), ("cue", "작업 중"), ("cue", "Working…")],
+)
+def test_status_labels_under_my_bubble_are_not_reply(bot, status, tmp_path):
+    """보내자마자 내 말풍선 아래에 뜨는 전송·진행 표시를 답으로 보면 '답이 이미 보임'으로 오판한다(2026-11-21 노트9)."""
+    a = _bot_adapter(bot, tmp_path)
+    assert a._exclude_text.search(status)
+    assert not a._exclude_text.search("작업 중인 내용을 정리했어요")
+
+
+def test_reply_time_learning_shrinks_past_verify_margin(tmp_path):
+    """확인 시점에 처음 열어 답이 끝나 있었으면 여유(verify_margin_s)를 빼고 줄인다. 빼지 않으면
+    (학습값+여유)×0.75 가 학습값과 같아지는 곳(여유 10초 → 30초)에서 멈춘다(2026-11-21 계약 테스트 뮤즈)."""
+
+    class Phone:
+        wait_notification = None
+
+    a = _bot_adapter("muse", tmp_path)
+    a.device = Phone()
+    a.android.verify_margin_s = 10
+    a._by_notification = False
+    a._reply_times.clear()
+    for _ in range(12):
+        a._sent_at = 100.0
+        a._first_read_at = a._last_change_at = 100.0 + a.verify_after_s()  # 확인 시점에 처음 열었고 이미 끝나 있음
+        a._answered()
+    assert a.verify_after_s() < 20

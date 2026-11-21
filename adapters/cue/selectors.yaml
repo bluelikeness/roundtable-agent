@@ -20,7 +20,8 @@ chat_tabs:
   - {desc_re: "탭하여 입력|[Tt]ap to (type|input)", clickable: true}
   - {name_env: CUE_CHAT_ROOM}
 # 시각은 "오후 7:20"·"7:20 오후"·"7:20 PM" 모두 답이 아니다
-exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*([AaPp][Mm]|오전|오후))?\s*$|^\s*\d{1,2}월\s*\d{1,2}일|^(오늘|어제|Today|Yesterday)$'
+# 진행 표시 "작업 중"도 답이 아니다(2026-11-21 노트9: 내 말풍선 아래에 떠 보내자마자 "답이 이미 보임"으로 오판)
+exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*([AaPp][Mm]|오전|오후))?\s*$|^\s*\d{1,2}월\s*\d{1,2}일|^(오늘|어제|Today|Yesterday)$|^\s*(작업\s*중|Working)(\.{3}|…)?\s*$'
 exclude_button_re: '^(뒤로|Agent 프로필)'
 confirm_button_re: '(결제|구매|확정|Pay|Confirm)'
 login_markers:

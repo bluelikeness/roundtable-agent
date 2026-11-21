@@ -19,5 +19,7 @@ android:
   app_start_wait_s: 8
   daily_limit: 300
   notify_fallback_s: 60
+  # 2026-11-21 노트9: 보낸 뒤 앱을 열어 두면(home_after_use: false) 답 알림이 오지 않았다(37초) → 평소 응답 시간에 바로 읽는다
+  verify_margin_s: 0
   # 작업 중 알림. 답 신호로 치지 않고 떠 있는 동안 응답 중으로 본다
   progress_channels: [aura_run_in_background]
