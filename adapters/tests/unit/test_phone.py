@@ -1007,3 +1007,78 @@ def test_reply_time_learning_shrinks_past_verify_margin(tmp_path):
         a._first_read_at = a._last_change_at = 100.0 + a.verify_after_s()  # 확인 시점에 처음 열었고 이미 끝나 있음
         a._answered()
     assert a.verify_after_s() < 20
+
+
+async def test_send_fallback_never_taps_named_other_button(tmp_path, monkeypatch):
+    """2026-11-22 노트9 피클: 글을 넣은 직후 트리에 전송 버튼이 아직 없어 입력줄 오른쪽 끝을 좌표로 눌렀더니
+    그 자리의 음성 버튼이 눌려 통화가 걸렸다. 한 번 더 읽어 전송 버튼을 찾고, 끝내 없으면 이름 있는 다른 버튼은
+    누르지 않고 실패한다."""
+    from adapters.android_base import parse_hierarchy
+    from adapters.base import BackendDown
+
+    def screen(right_desc: str) -> str:
+        def node(cls: str, b: str, desc: str = "", text: str = "") -> str:
+            return (f'<node class="{cls}" package="com.pickle.client" text="{text}" content-desc="{desc}" '
+                    f'clickable="true" bounds="{b}"/>')
+
+        return (
+            '<hierarchy><node class="android.view.View" package="com.pickle.client" text="" content-desc="" clickable="false" bounds="[0,0][1080,2094]">'
+            + node("android.widget.EditText", "[40,1780][900,1900]", text="안녕")
+            + node("android.view.View", "[930,1780][1060,1900]", desc=right_desc)
+            + "</node></hierarchy>"
+        )
+
+    clicks: list = []
+
+    class Phone:
+        wait_notification = None
+
+        async def state(self):
+            return {"ime_top": None, "width": 1080, "density": 2.625}
+
+        async def click_at(self, x, y):
+            clicks.append((x, y))
+
+        async def click_selector(self, sel):
+            clicks.append(("node", sel.get("descriptionMatches")))
+
+    a = _bot_adapter("pickle", tmp_path)
+    a.device = Phone()
+    a.SEND_SETTLE_S = a.SEND_LATE_S = a.SEND_CHECK_S = a.SEND_FIRST_CHECK_S = 0.01
+    voice = parse_hierarchy(screen("음성 채팅"))
+    screens = [voice]
+
+    async def tree():
+        return screens[0]
+
+    monkeypatch.setattr(a, "tree", tree)
+    monkeypatch.setattr(a, "_appeared", lambda root: asyncio.sleep(0, result=None))
+    with pytest.raises(BackendDown, match="전송 버튼 없음"):
+        await a._tap_send("안녕")
+    assert clicks == []
+
+    # 한 번 더 읽었을 때 전송 버튼이 떴으면 그것을 누른다
+    reads = []
+
+    async def tree_late():
+        reads.append(1)
+        return voice if len(reads) <= 1 else parse_hierarchy(screen("보내기"))
+
+    monkeypatch.setattr(a, "tree", tree_late)
+    a.SEND_CONFIRM_S = a.FAST_CONFIRM_S = 0.05
+    try:
+        await a._tap_send("안녕")
+    except BackendDown:
+        pass
+    assert clicks and clicks[0][0] == "node"
+
+
+def test_call_notifications_are_not_answers(tmp_path):
+    """피클 통화 중 알림(calls 채널)은 답 알림이 아니다(2026-11-22 노트9: 통화 알림을 답으로 읽었다)."""
+    a = _bot_adapter("pickle", tmp_path)
+    evs = [
+        {"event": "notif.posted", "data": {"channel": "calls", "id": 4001}},
+        {"event": "notif.posted", "data": {"channel": "messages", "id": 1}},
+    ]
+    answers = a._absorb(evs, 10)
+    assert [e["data"]["channel"] for e in answers] == ["messages"]
