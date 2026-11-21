@@ -5,8 +5,10 @@
   /phone/ws                     휴대폰 워커. Authorization: Bearer <기기 토큰>. 공개 경로는 이것 하나(Caddy)
   GET  /state                   연결 여부·기기 이름·마지막 수신 경과
   POST /rpc                     {cmd, args, timeout_s, lease} → 휴대폰 명령 결과
-  POST /lease                   {holder, wait_s, ttl_s} → {lease}. 화면 임대(봇 셋이 화면 하나를 나눠 쓴다)
+  POST /lease                   {holder, wait_s, ttl_s, priority} → {lease}. 화면 임대(봇 셋이 화면 하나를 나눠 쓴다).
+                                priority: send(기본) | read. 보내려고 기다리는 봇이 있으면 read 는 빈 화면을 받지 못한다
   POST /lease/{id}/renew, DELETE /lease/{id}
+  POST /lease/{id}/yield        {to: send|any} 보내려고(any: 누구든) 기다리는 봇이 있으면 임대를 돌려준다 → {released}
   GET  /events?after=&pkg=&wait_s=   알림 이벤트 롱폴링
   POST /apk/link                한 번만 쓰는 APK 다운로드 경로를 만든다(QR 설치용, 30분)
   GET  /devices                 붙은 적 있는 휴대폰 목록과 우선 휴대폰(허브 봇 상태 패널 "사용할 폰")
@@ -112,31 +114,43 @@ class Lease:
 class Leases:
     """화면 임대 하나. 만료(ttl)가 있어 어댑터가 죽어도 화면이 영영 잠기지 않는다."""
 
+    PRIORITIES = ("send", "read")
+
     def __init__(self) -> None:
         self.current: Lease | None = None
         self._cond = asyncio.Condition()
+        # 기다리는 수. 보내기(send)가 읽기(read)보다 먼저다: 봇 넷에 차례로 보내는 동안 먼저 보낸 봇이 답을 읽느라
+        # 화면을 잡으면 뒤 봇의 보내기가 그만큼 밀린다(2026-11-21 노트9: 넷째 봇이 48초 늦게 보냄)
+        self.waiting = {p: 0 for p in self.PRIORITIES}
 
     def _expire(self) -> None:
         if self.current is not None and time.monotonic() >= self.current.expires_at:
             log.warning("화면 임대 만료: %s", self.current.holder)
             self.current = None
 
-    async def acquire(self, holder: str, wait_s: float, ttl_s: float) -> Lease | None:
+    async def acquire(self, holder: str, wait_s: float, ttl_s: float, priority: str = "send") -> Lease | None:
+        if priority not in self.PRIORITIES:
+            priority = "send"
         end = time.monotonic() + wait_s
         async with self._cond:
-            while True:
-                self._expire()
-                if self.current is None:
-                    self.current = Lease(secrets.token_hex(8), holder, time.monotonic() + ttl_s)
-                    return self.current
-                left = end - time.monotonic()
-                if left <= 0:
-                    return None
-                # 만료 시각에도 깨어나야 하므로 짧게 나눠 기다린다
-                try:
-                    await asyncio.wait_for(self._cond.wait(), timeout=min(left, 0.5))
-                except TimeoutError:
-                    pass
+            self.waiting[priority] += 1
+            try:
+                while True:
+                    self._expire()
+                    if self.current is None and (priority == "send" or self.waiting["send"] == 0):
+                        self.current = Lease(secrets.token_hex(8), holder, time.monotonic() + ttl_s)
+                        return self.current
+                    left = end - time.monotonic()
+                    if left <= 0:
+                        return None
+                    # 만료 시각에도 깨어나야 하므로 짧게 나눠 기다린다
+                    try:
+                        await asyncio.wait_for(self._cond.wait(), timeout=min(left, 0.5))
+                    except TimeoutError:
+                        pass
+            finally:
+                self.waiting[priority] -= 1
+                self._cond.notify_all()  # 보내기 대기가 끝나면 읽기가 받을 수 있다
 
     def valid(self, lease_id: str | None) -> bool:
         self._expire()
@@ -147,6 +161,14 @@ class Leases:
             return False
         self.current.expires_at = time.monotonic() + ttl_s
         return True
+
+    async def yield_to_send(self, lease_id: str, any_waiting: bool = False) -> bool:
+        """보내려고 기다리는 봇이 있으면 임대를 돌려준다(읽는 중인 봇이 한 번 볼 때마다 부른다).
+
+        any_waiting: 읽기를 기다리는 봇에게도 넘긴다(아직 답이 없는 봇이 화면을 쥐고 기다리지 않게)."""
+        if self.waiting["send"] == 0 and not (any_waiting and self.waiting["read"] > 0):
+            return False
+        return await self.release(lease_id)
 
     async def release(self, lease_id: str) -> bool:
         async with self._cond:
@@ -463,7 +485,9 @@ class Gateway:
     async def lease_acquire(self, request: Request) -> JSONResponse:
         body = await request.json()
         holder = str(body.get("holder") or "?")
-        got = await self.leases.acquire(holder, float(body.get("wait_s") or 0), float(body.get("ttl_s") or 30))
+        got = await self.leases.acquire(
+            holder, float(body.get("wait_s") or 0), float(body.get("ttl_s") or 30), str(body.get("priority") or "send")
+        )
         if got is not None and self._off_task is not None:
             self._off_task.cancel()  # 다시 쓴다. 끄지 않는다
             self._off_task = None
@@ -476,6 +500,11 @@ class Gateway:
         body = await request.json() if await request.body() else {}
         ok = self.leases.renew(request.path_params["lease"], float(body.get("ttl_s") or 30))
         return JSONResponse({"ok": ok}, status_code=200 if ok else 409)
+
+    async def lease_yield(self, request: Request) -> JSONResponse:
+        body = await request.json() if await request.body() else {}
+        released = await self.leases.yield_to_send(request.path_params["lease"], body.get("to") == "any")
+        return JSONResponse({"released": released})
 
     async def lease_release(self, request: Request) -> JSONResponse:
         ok = await self.leases.release(request.path_params["lease"])
@@ -593,6 +622,7 @@ class Gateway:
                 Route("/rpc", self.rpc, methods=["POST"]),
                 Route("/lease", self.lease_acquire, methods=["POST"]),
                 Route("/lease/{lease}/renew", self.lease_renew, methods=["POST"]),
+                Route("/lease/{lease}/yield", self.lease_yield, methods=["POST"]),
                 Route("/lease/{lease}", self.lease_release, methods=["DELETE"]),
                 Route("/events", self.events_poll),
                 Route("/devices", self.devices),

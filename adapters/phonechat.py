@@ -43,6 +43,7 @@ import io
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +146,12 @@ class PhoneChatAdapter(AndroidAdapter):
     ROW_SETTLE_S = 10.0
     SEND_FIRST_CHECK_S = 0.3
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(느린 휴대폰은 트리 반영이 몇 초 늦다)
+    # 휴대폰 빠른 보내기: 이미 아는 전송 버튼(base·learned)은 누른 뒤 이만큼만 보고 확인이 안 돼도 다시 누르지 않고
+    # 떠난다. 전송은 답 알림 또는 확인 시점의 화면(check_sent)으로 안다. 노트9 는 트리가 늦게 바뀌어 짧게 보고
+    # 다시 누르면 중복 전송이 된다
+    FAST_CONFIRM_S = 1.0
+    VERIFY_RECHECK_S = 1.5  # 확인 시점에 보낸 질문이 안 보이면 이만큼 뒤 한 번 더 본다
+    PROFILE_TTL_S = 600.0  # 기기 정보·앱 버전 조회를 다시 쓰는 시간
     FOCUS_SETTLE_S = 1.0
     INPUT_CHECK_S = 3.0  # 노트9: set_text 결과가 트리에 1.5초 넘게 늦게 보이기도 한다
     # 글 넣는 방법(환경 맞추기에서 앞에서부터 시험한다)
@@ -177,6 +184,7 @@ class PhoneChatAdapter(AndroidAdapter):
         self._confirm_root: UiNode | None = None
         self._sdk: int | None = None
         self._set_text_used = False
+        self._profile_at = -1e9
 
     # --- 화면 읽기 ---------------------------------------------------------
 
@@ -281,11 +289,13 @@ class PhoneChatAdapter(AndroidAdapter):
         if self.phone_mode and await self.device.current_package() != self.android.package:
             await self._ensure_ready()  # 재전송: 첫 전송 뒤 홈으로 나가 있다
         await self.before_send()
-        if hasattr(self.device, "app_version"):
+        if hasattr(self.device, "app_version") and time.monotonic() - self._profile_at > self.PROFILE_TTL_S:
+            # 세션 동안 바뀌지 않는 값이라 보낼 때마다 묻지 않는다(앱 업데이트는 길어야 PROFILE_TTL_S 늦게 반영)
             prof = await self.device.device_profile() if hasattr(self.device, "device_profile") else {}
             self._sdk = prof.get("sdk")
             dev = device_id(prof.get("device"), self._sdk) if prof.get("device") else None
             self._app_key = app_key(self.android.package, await self.device.app_version(self.android.package), dev)
+            self._profile_at = time.monotonic()
         self._set_text_used = False
         self._confirm_root = None
         root = await self.tree()
@@ -620,10 +630,12 @@ class PhoneChatAdapter(AndroidAdapter):
             # 보낸 글과 같은 글 노드(입력창 제외) 수. 늘었으면 내 말풍선이 생긴 것 = 전송됨
             return sum(1 for n in self._app_nodes(r) if not n.cls.endswith("EditText") and is_own(_norm(self._label(n)), want))
 
-        before = mine(await self.tree())
+        root = await self.tree()
+        before = mine(root)
         used: tuple[UiNode, str] | None = None
         for attempt in range(self.SEND_TRIES):
-            root = await self.tree()
+            if attempt > 0:
+                root = await self.tree()
             hit = await self._find_send(root, for_press=attempt == 0)
             if hit is not None:
                 await self._press(*hit)
@@ -647,11 +659,13 @@ class PhoneChatAdapter(AndroidAdapter):
             # 느린 휴대폰(노트9)은 전송 결과가 트리에 몇 초 늦게 반영된다. 한 번만 보고 다시 누르면 이미 보낸
             # 뒤라 헛누름(또는 중복 전송)이 된다 → 잠시 여러 번 본다
             loop = asyncio.get_running_loop()
-            until = loop.time() + max(self.SEND_CHECK_S, self.SEND_CONFIRM_S)
+            fast = self.phone_mode and used is not None and used[1] in ("base", "learned")
+            until = loop.time() + (self.FAST_CONFIRM_S if fast else max(self.SEND_CHECK_S, self.SEND_CONFIRM_S))
             first = True
             while True:
                 # 첫 확인은 짧게(전송이 확인되는 대로 앱을 떠나야 답 알림이 뜬다)
-                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else self.SEND_CHECK_S)
+                later = min(0.5, self.SEND_CHECK_S) if fast else self.SEND_CHECK_S
+                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else later)
                 first = False
                 root = await self.tree()
                 self._confirm_root = root
@@ -672,6 +686,10 @@ class PhoneChatAdapter(AndroidAdapter):
                 if field is None or _norm(field.text) != want:
                     return self._learn(used)
                 if loop.time() >= until:
+                    if fast:
+                        # 트리 반영이 늦을 뿐일 수 있다. 다시 누르면 중복 전송 → 떠나고 알림·확인 시점에 맡긴다
+                        log.info("빠른 보내기: %.1f초 안에 전송 확인 못 함 → 알림·확인 시점에 맡김", self.FAST_CONFIRM_S)
+                        return None
                     break
         raise BackendDown(f"전송 버튼을 {self.SEND_TRIES}번 눌러도 전송되지 않음")
 
@@ -793,11 +811,21 @@ class PhoneChatAdapter(AndroidAdapter):
     async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]:
         if not await self.reply_signal(deadline):
             return []
-        async with self.screen():
+        async with self.screen("read"):
             await self.open_for_read()
             root = await self.tree()
-        if self.phone_mode and not any(n.package == self.android.package for n in root.walk()):
+            if self._verifying and not self._sent_seen(root):
+                # 느린 휴대폰은 앱을 연 직후 트리가 옛 화면일 수 있다. 다시 보내기 전에 한 번 더 본다
+                await asyncio.sleep(self.VERIFY_RECHECK_S)
+                root = await self.tree()
+        own_app = not self.phone_mode or any(n.package == self.android.package for n in root.walk())
+        # 보내려는 봇이 있으면 먼저 보내게 하고, 아직 답이 없으면(생각 중) 읽으려는 봇에게도 화면을 넘긴다
+        await self.yield_screen(has_reply=own_app and bool(self._new_texts(root)))
+        if not own_app:
             return []  # 다른 앱 화면(다음 폴링에서 다시)
+        if self._verifying:
+            # 버튼만 누른 경우(보낸 글 없음)는 비교할 질문이 없어 보낸 것으로 본다
+            self.check_sent(not self._sent_norm or self._own_anchor(root) is not None, self._screen_changed(root))
         msgs: list[RawMessage] = []
         seen: dict[str, int] = {}
         nodes = self._new_texts(root)
@@ -809,6 +837,13 @@ class PhoneChatAdapter(AndroidAdapter):
             next_top = nodes[i + 1].bounds.top if i + 1 < len(nodes) else floor
             msgs.append(RawMessage(id=mid, text=body, meta={"buttons": self._buttons(root, n.bounds.top, next_top)}))
         return msgs
+
+    def _sent_seen(self, root: UiNode) -> bool:
+        return not self._sent_norm or self._own_anchor(root) is not None or self._screen_changed(root)
+
+    def _screen_changed(self, root: UiNode) -> bool:
+        """보내기 전 화면에 없던 글이 대화 영역에 있는지."""
+        return any(self._sig(n) not in self._baseline for n in self._texts(root))
 
     def _buttons(self, root: UiNode, top: int, bottom: int) -> list[str]:
         labels: list[str] = []

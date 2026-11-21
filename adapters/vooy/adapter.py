@@ -71,6 +71,10 @@ class VooyAdapter(AndroidAdapter):
     SEND_TRIES = 3
     SEND_FIRST_CHECK_S = 0.3
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(다시 누르기 전)
+    # 휴대폰 빠른 보내기: 누른 뒤 이만큼만 보고, 확인이 안 돼도 다시 누르지 않고 떠난다(노트9 는 트리가 늦게 바뀌어
+    # 다시 누르면 중복 전송). 전송은 답 알림 또는 확인 시점의 화면(check_sent)으로 안다
+    FAST_CONFIRM_S = 1.0
+    VERIFY_RECHECK_S = 1.5
     # _ensure_ready 의 덤프를 _send 가 다시 쓰는 최대 나이
     TREE_REUSE_S = 5.0
 
@@ -222,10 +226,10 @@ class VooyAdapter(AndroidAdapter):
         if self.phone_mode and self._sent_norm:
             # 답은 알림으로 안다. 대화방이 열려 있는 동안 온 답은 알림이 뜨지 않으므로 전송이 확인되면 바로
             # 홈으로 나간다. 화면을 더 읽지 않고, 전송을 확인한 그 화면에 답이 벌써 있는지만 본다
-            replied = bool(self._new_bubbles(confirmed))
+            replied = confirmed is not None and bool(self._new_bubbles(confirmed))
         await self.after_send(already_replied=replied)
 
-    async def _tap_send(self, body: str = "") -> UiNode:
+    async def _tap_send(self, body: str = "") -> UiNode | None:
         """전송 버튼을 누르고 입력창이 비었는지로 전송을 확인한다.
 
         set_text 직후 바로 누르면 RN 이 입력값을 아직 반영하지 않아 눌러도 아무 일이 없다
@@ -233,6 +237,14 @@ class VooyAdapter(AndroidAdapter):
         입력창이 그대로면 다시 누른다. 입력창이 비었으면 전송된 것이므로 중복 전송은 없다.
         """
         await asyncio.sleep(self.SEND_SETTLE_S)
+        if self.phone_mode and self.sel.get("send_u2") and hasattr(self.device, "click_selector"):
+            # 빠른 보내기: 화면을 다시 읽지 않고 셀렉터로 누른다(2026-11-21 노트9: 글을 넣은 뒤 트리 읽기 6.8·7.3초,
+            # 보내기 한 번 21초). 전송 확인도 하지 않는다 → 답 알림 또는 확인 시점(check_sent)에 맡긴다
+            try:
+                await self.device.click_selector(self.scoped(self.sel["send_u2"]))
+                return None
+            except Exception as e:  # noqa: BLE001 - 전송 버튼이 아직 없다(글이 안 들어감 등). 화면을 읽어 예전처럼
+                log.info("전송 버튼 셀렉터로 누르기 실패, 화면을 읽어 누름: %s", e)
         root = await self._tree()  # 키보드가 올라온 뒤의 버튼 위치
         before = len(self._own_bubbles_with(root, body))
         for _ in range(self.SEND_TRIES):
@@ -243,11 +255,13 @@ class VooyAdapter(AndroidAdapter):
             # 느린 휴대폰(2026-11-12 갤럭시 노트9)은 말풍선·입력창이 접근성 트리에 몇 초 늦게 반영된다.
             # 한 번만 보고 다시 누르면 이미 보낸 뒤라 헛누름이 되고 실패로 끝난다 → 잠시 여러 번 본다
             loop = asyncio.get_running_loop()
-            until = loop.time() + max(self.SEND_CHECK_S, self.SEND_CONFIRM_S)
+            fast = self.phone_mode
+            until = loop.time() + (self.FAST_CONFIRM_S if fast else max(self.SEND_CHECK_S, self.SEND_CONFIRM_S))
             first = True
             while True:
                 # 첫 확인은 짧게(전송이 확인되는 대로 앱을 떠나야 답 알림이 뜬다)
-                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else self.SEND_CHECK_S)
+                later = min(0.5, self.SEND_CHECK_S) if fast else self.SEND_CHECK_S
+                await asyncio.sleep(min(self.SEND_FIRST_CHECK_S, self.SEND_CHECK_S) if first else later)
                 first = False
                 # 확인용 덤프를 다음 시도의 버튼 위치로도 쓴다
                 self._tree_cache = None
@@ -260,6 +274,9 @@ class VooyAdapter(AndroidAdapter):
                 if field is None or not field.text.strip():
                     return root
                 if loop.time() >= until:
+                    if fast:
+                        log.info("빠른 보내기: %.1f초 안에 전송 확인 못 함 → 알림·확인 시점에 맡김", self.FAST_CONFIRM_S)
+                        return root
                     break
         raise BackendDown(f"전송 버튼을 {self.SEND_TRIES}번 눌러도 입력창이 비지 않음")
 
@@ -284,11 +301,20 @@ class VooyAdapter(AndroidAdapter):
     async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]:
         if not await self.reply_signal(deadline):
             return []  # 휴대폰: 답 알림 전에는 화면을 열지 않는다
-        async with self.screen():
+        async with self.screen("read"):
             await self.open_for_read()
             root = await self._tree()
-        if self.phone_mode and not any(n.package == self.android.package for n in root.walk()):
+            if self._verifying and not self._sent_seen(root):
+                # 느린 휴대폰은 앱을 연 직후 트리가 옛 화면일 수 있다. 다시 보내기 전에 한 번 더 본다
+                await asyncio.sleep(self.VERIFY_RECHECK_S)
+                root = await self._tree()
+        own_app = not self.phone_mode or any(n.package == self.android.package for n in root.walk())
+        # 보내려는 봇이 있으면 먼저 보내게 하고, 아직 답이 없으면(생각 중) 읽으려는 봇에게도 화면을 넘긴다
+        await self.yield_screen(has_reply=own_app and bool(self._new_bubbles(root)))
+        if not own_app:
             return []  # 다른 앱 화면(다음 폴링에서 다시)
+        if self._verifying:
+            self.check_sent(self._own_seen(root), bool(self._sigs(root) - self._baseline))
         new = self._new_bubbles(root)
 
         msgs: list[RawMessage] = []
@@ -311,6 +337,15 @@ class VooyAdapter(AndroidAdapter):
             if any(r.search(m.text) for r in self._limit_re):
                 raise RateLimited(f"Vooy 사용 제한 안내: {m.text[:60]}")
         return msgs
+
+    def _own_seen(self, root: UiNode) -> bool:
+        """보낸 질문(내 말풍선)이 보이는지. 버튼만 누른 경우는 비교할 질문이 없어 보인 것으로 본다."""
+        if not self._sent_norm:
+            return True
+        return any(self._own_matches(o) for o in self._bubbles(root, self.sel["own_bubble"]))
+
+    def _sent_seen(self, root: UiNode) -> bool:
+        return self._own_seen(root) or bool(self._sigs(root) - self._baseline)
 
     def _new_bubbles(self, root: UiNode) -> list[UiNode]:
         """보낸 메시지(내 말풍선) 아래의 봇 말풍선. 내 말풍선이 안 보이면 보내기 전에 없던 것."""

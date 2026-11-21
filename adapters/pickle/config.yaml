@@ -20,3 +20,5 @@ android:
   app_start_wait_s: 8
   daily_limit: 300
   notify_fallback_s: 60
+  # 2026-11-21 노트9: 방금 앱을 쓴 뒤 이어 물으면 답 알림이 오지 않았다 → 평소 응답 시간에 바로 화면을 읽는다
+  verify_margin_s: 0
