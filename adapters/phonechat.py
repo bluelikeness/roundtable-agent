@@ -145,6 +145,7 @@ class PhoneChatAdapter(AndroidAdapter):
     # 글을 넣은 뒤 입력줄 버튼이 늘기를 기다리는 시간(rightmost_when_row_grows 앱). 탭 Cue 는 트리가 4초 넘게 늦기도 했다
     ROW_SETTLE_S = 10.0
     SEND_FIRST_CHECK_S = 0.3
+    SEND_LATE_S = 1.0  # 글을 넣은 뒤 전송 버튼이 안 보이면 좌표 대비책 전에 한 번 더 보기까지(휴대폰)
     SEND_CONFIRM_S = 4.0  # 한 번 누른 뒤 전송 확인을 기다리는 시간(느린 휴대폰은 트리 반영이 몇 초 늦다)
     # 휴대폰 빠른 보내기: 이미 아는 전송 버튼(base·learned)은 누른 뒤 이만큼만 보고 확인이 안 돼도 다시 누르지 않고
     # 떠난다. 전송은 답 알림 또는 확인 시점의 화면(check_sent)으로 안다. 노트9 는 트리가 늦게 바뀌어 짧게 보고
@@ -637,6 +638,12 @@ class PhoneChatAdapter(AndroidAdapter):
             if attempt > 0:
                 root = await self.tree()
             hit = await self._find_send(root, for_press=attempt == 0)
+            if hit is None and attempt == 0 and self.phone_mode:
+                # 느린 휴대폰은 글을 넣은 뒤 전송 버튼이 트리에 늦게 나타난다. 바로 좌표 대비책으로 가면
+                # 아직 그 자리에 있는 음성 버튼을 누른다(2026-11-22 노트9 피클: 음성 통화가 걸림) → 한 번 더 본다
+                await asyncio.sleep(self.SEND_LATE_S)
+                root = await self.tree()
+                hit = await self._find_send(root, for_press=True)
             if hit is not None:
                 await self._press(*hit)
                 used = hit
@@ -701,6 +708,30 @@ class PhoneChatAdapter(AndroidAdapter):
         if sel is not None:
             self.learned.put(self._app_key, "send", sel)
 
+    def _named_button_at(self, root: UiNode, x: int, y: int) -> str | None:
+        """(x, y) 를 덮는 가장 작은 누를 수 있는 노드가 전송 버튼이 아닌 이름 있는 버튼이면 그 이름.
+
+        이름 없는 노드(Flutter 아이콘)나 덮는 노드가 없으면 None(좌표로 눌러도 된다).
+        """
+        best: UiNode | None = None
+        for n in self._app_nodes(root):
+            b = n.bounds
+            if not n.clickable or b.empty or not (b.left <= x <= b.right and b.top <= y <= b.bottom):
+                continue
+            if best is None or (b.right - b.left) * (b.bottom - b.top) < (best.bounds.right - best.bounds.left) * (
+                best.bounds.bottom - best.bounds.top
+            ):
+                best = n
+        if best is None:
+            return None
+        # 이름은 노드 자신 또는 안쪽 노드(Compose 아이콘은 안쪽 노드에 content-desc 가 있기도 하다)
+        names = [s.strip() for n in best.walk() for s in (n.desc, n.text) if s and s.strip()]
+        if not names:
+            return None
+        if self.sel.get("send") and find_first(best, self.sel["send"]) is not None:
+            return None
+        return names[0]
+
     async def _tap_send_fallback(self) -> bool:
         """전송 버튼을 트리에 내놓지 않는 앱(에뮬레이터 피클 1.1.16).
 
@@ -727,6 +758,12 @@ class PhoneChatAdapter(AndroidAdapter):
         # 전송 버튼 자리는 앱 창의 오른쪽 끝(팝업이면 화면 끝이 아니다)
         right = win.right if popup and win is not None else width
         x = int(right - 40 * dp)
+        other = self._named_button_at(root, x, y)
+        if other is not None:
+            # 그 자리에 이름 있는 다른 버튼(음성·첨부 등)이 있다 = 전송 버튼 자리가 아니다. 누르지 않는다
+            # (2026-11-22 노트9 피클: 전송 버튼이 트리에 늦게 떠 이 자리를 눌렀더니 음성 통화가 걸렸다)
+            log.warning("좌표 대비책 취소: 그 자리는 전송 버튼이 아님(%r)", other)
+            return False
         if hasattr(self.device, "click_at"):
             await self.device.click_at(x, y)  # 접근성 클릭(Flutter·RN 아이콘 버튼은 좌표 탭이 안 먹을 수 있다)
         else:

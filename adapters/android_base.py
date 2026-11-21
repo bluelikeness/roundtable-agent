@@ -327,6 +327,8 @@ class AndroidConfig(BaseModel):
     home_after_use: bool = False
     # "작업 중" 알림 채널(뮤즈 aura_run_in_background). 답 신호로 치지 않고, 떠 있는 동안 응답 중으로 본다
     progress_channels: list[str] = []
+    # 답 신호가 아닌 알림 채널(피클 calls: 통화 중 알림). 답 알림으로 치지 않는다
+    ignore_channels: list[str] = []
 
 
 def load_selectors(path: str | Path) -> dict[str, Any]:
@@ -511,10 +513,15 @@ class AndroidAdapter(BotAdapter):
         """알림 이벤트를 반영하고 답 신호가 되는 posted 이벤트만 돌려준다."""
         self._notif_cursor = cursor
         progress = set(self.android.progress_channels)
+        ignore = set(self.android.ignore_channels)
         answers = []
         for e in events:
             d = e.get("data") or {}
             key = str(d.get("key") or d.get("id"))
+            if d.get("channel") in ignore:
+                if e.get("event") == "notif.posted":
+                    log.warning("답이 아닌 알림 채널 %s 무시", d.get("channel"))
+                continue
             if d.get("channel") in progress:
                 if e.get("event") == "notif.posted":
                     self._progress_keys.add(key)
