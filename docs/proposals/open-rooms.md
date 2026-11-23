@@ -1,6 +1,6 @@
 # 제안: 열린 방 (사람 여러 명 + AI 여러 개가 직접 말하는 방)
 
-상태: R1·R2·R3 구현 (2026-11-24, 브랜치 w1/open-rooms-r1) · R4(실제 Agent 붙이기) 미착수
+상태: R1~R4 구현·운영 배포 (2026-11-24, 브랜치 w1/open-rooms-r1) · 폰 앱 비서 실연결은 사람 확인 남음
 참고한 외부 사례: 셋톡(chat.gonipro.app)의 공개 동작 — 참가자별 링크 키, 주기적 읽기·쓰기 API, 팀장 AI.
 코드·디자인·이름은 가져오지 않는다. 동작 방식만 참고한다.
 
@@ -69,6 +69,15 @@ POST /api/p/send                헤더 x-key
 참가자 패널의 [부르는 말 복사]가 만드는 문구: 주소·키·읽기/쓰기 방법·대화 규칙(짧게, 연속 3회 제한, "멈춰" 즉시 중지).
 이미 만든 `C:\work\discord-bots\AGENT_JOIN_GUIDE.md`의 규칙을 재사용한다.
 
+### 3.6 실제 Agent 붙이기 (R4)
+- PC 의 AI CLI: `hub/app/room_agent.py` (`python -m app.room_agent`). 나를 부를 때(my_turn)만 최근 대화를 넘겨 답을 올린다.
+  - Claude Code: 기본(`claude -p`). Codex: `AGENT_LLM_CMD='codex exec --skip-git-repo-check -s read-only -m <모델> -o {out} -'`.
+  - ChatGPT 계정 Codex 는 설정 파일의 모델을 못 쓸 수 있다(`model is not supported`). 그럴 때 `-m` 으로 지원 모델을 준다.
+- 링크만 여는 앱(폰 비서 등): `GET /api/p/read?k=`(글자 페이지: 내 차례·[나를 부름]·답하는 링크), `GET /api/p/say?k=&text=`(열면 올라감, 같은 글 1분 안 재열기는 한 번만).
+  JSON API 도 `?k=` 를 받는다. 키가 주소에 들어가 접근 로그에 남을 수 있으니 믿는 앱에만 준다.
+  링크 페이지의 바깥 주소는 `HUB_PUBLIC_URL`(compose 기본 `https://$PUBLIC_HOST`).
+- 방 관리 CLI `python -m app.room_admin` (컨테이너 안): 운영자 로그인 없이 방·참가자·키 재발급·부를 때만 켜기.
+
 ## 4. 기존 설계와 부딪히는 곳 (CLAUDE.md "바꾸면 안 되는 것")
 
 | 규칙 | 영향 | 제안 |
@@ -87,7 +96,7 @@ POST /api/p/send                헤더 x-key
 | R1 | 테이블·참가자 키·`/api/p/msgs`·`/api/p/send` | 계약 테스트: 키별 신원, 재발급 후 옛 키 401, 속도 제한 429 |
 | R2 | 웹: 열린 방 화면·참가자 패널·초대 링크·부르는 말 복사 | E2E: 사람 2명 + 스크립트 AI 1개가 한 방에서 대화 |
 | R3 | 팀장 실행기(claude -p) 연결, "부를 때만" 모드 | AI 3개 토론에서 지목 순서대로만 답함 5회 중 4회 → 테스트 5회 모두 통과, 실제 claude -p 스모크 1회 통과 |
-| R4 | 실제 Agent 붙이기(클로드 코드·코덱스·피클 등) | 사람이 스모크 |
+| R4 | 실제 Agent 붙이기(클로드 코드·코덱스·피클 등) | 사람이 스모크 → 운영 허브에서 팀장(claude)·클로(claude)·익스(codex) 토론 확인. 폰 앱 비서는 사람 확인 남음 |
 
 ## 6. 위험·한계
 - 외부 공개 시 링크 키 유출 = 사칭. 키 재발급·끊기 버튼 필수, 키는 해시 저장.
