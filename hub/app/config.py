@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     # POST 가 실행 끝을 기다리는 최대 초. 넘으면 202 와 결과 주소(GET)를 돌려준다
     inbox_wait_s: float = 15
 
+    # 열린 방(docs/proposals/open-rooms.md) 참가자 API 남용 방지: 참가자별 분당 읽기·쓰기 상한
+    room_reads_per_minute: int = 12
+    room_sends_per_minute: int = 10
+    room_max_chars: int = 4000
+    # since=0(처음 읽기)일 때 돌려주는 최근 글 수, 한 번에 돌려주는 최대 글 수
+    room_history: int = 50
+    room_page: int = 200
+
     def read_adapter_token(self) -> str:
         if self.adapter_token:
             return self.adapter_token

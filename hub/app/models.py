@@ -184,3 +184,67 @@ class Operator(Base):
     # 마지막으로 받아 준 TOTP 시간 단계. 같은 코드의 재사용을 막는다
     last_totp_step: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = _ts()
+
+
+# --- 열린 방 (docs/proposals/open-rooms.md) ---
+# 기존 1인 방(session)과 따로 둔다. 참가자마다 키가 곧 신원이고, 키는 sha256 해시만 저장한다.
+
+
+class ParticipantKind(str, enum.Enum):
+    human = "human"
+    ai = "ai"
+
+
+class ParticipantRole(str, enum.Enum):
+    member = "member"
+    leader = "leader"
+
+
+class Room(Base):
+    __tablename__ = "room"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _ts()
+    # 닫은 시각. 닫힌 방은 참가자 API 가 410 을 돌려준다
+    closed_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
+
+
+class Participant(Base):
+    __tablename__ = "participant"
+    __table_args__ = (UniqueConstraint("room_id", "name", name="uq_participant_room_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("room.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[ParticipantKind] = mapped_column(Enum(ParticipantKind, name="participant_kind"), nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    # 키 원문은 저장하지 않는다. 발급 응답에서 한 번만 보여 준다
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    role: Mapped[ParticipantRole] = mapped_column(
+        Enum(ParticipantRole, name="participant_role"), nullable=False, default=ParticipantRole.member
+    )
+    # 이 참가자에게 권하는 확인 간격(초). 읽기 응답에 실어 보낸다
+    check_every_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60", default=60)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
+    last_seen_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
+    created_at: Mapped[datetime] = _ts()
+
+
+class RoomMessage(Base):
+    __tablename__ = "room_message"
+
+    # 전역 단조 증가. 참가자는 since=<마지막 id> 로 이어 읽는다
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("room.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 참가자를 지워도 글은 남긴다. 그때를 위해 보낸 이름·종류를 같이 적어 둔다
+    participant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("participant.id", ondelete="SET NULL"), nullable=True
+    )
+    who: Mapped[str] = mapped_column(String(40), nullable=False)
+    kind: Mapped[ParticipantKind] = mapped_column(Enum(ParticipantKind, name="participant_kind"), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _ts()
