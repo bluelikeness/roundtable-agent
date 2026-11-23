@@ -10,6 +10,8 @@ export interface RoomOut {
   created_at: string;
   closed_at: string | null;
   invite_on: boolean;
+  /** 'AI는 부를 때만' */
+  call_only: boolean;
 }
 
 export interface ParticipantOut {
@@ -33,6 +35,8 @@ export interface RoomMsg {
   kind: ParticipantKind;
   text: string;
   ts: string;
+  /** 참가자 API 에서만: 이 글이 나를 불렀는지 */
+  to_me?: boolean;
 }
 
 export interface MsgsOut {
@@ -42,6 +46,8 @@ export interface MsgsOut {
 }
 
 export interface PMsgsOut extends MsgsOut {
+  call_only: boolean;
+  my_turn: boolean;
   me: string;
   kind: ParticipantKind;
   role: ParticipantRole;
@@ -86,11 +92,15 @@ export const roomsApi = {
   list: () => call<RoomOut[]>("GET", "/api/rooms"),
   create: (name: string) => call<RoomOut>("POST", "/api/rooms", { name }),
   rename: (id: string, name: string) => call<RoomOut>("PATCH", `/api/rooms/${id}`, { name }),
+  update: (id: string, body: { name?: string; call_only?: boolean }) => call<RoomOut>("PATCH", `/api/rooms/${id}`, body),
   close: (id: string) => call<RoomOut>("DELETE", `/api/rooms/${id}`),
   messages: (id: string, since = 0) => call<MsgsOut>("GET", `/api/rooms/${id}/messages?since=${since}`),
   send: (id: string, text: string) => call<{ id: number }>("POST", `/api/rooms/${id}/messages`, { text }),
   participants: (id: string) => call<ParticipantOut[]>("GET", `/api/rooms/${id}/participants`),
-  addParticipant: (id: string, body: { name: string; kind: ParticipantKind; check_every_s?: number }) =>
+  addParticipant: (
+    id: string,
+    body: { name: string; kind: ParticipantKind; role?: ParticipantRole; check_every_s?: number },
+  ) =>
     call<ParticipantKeyOut>("POST", `/api/rooms/${id}/participants`, body),
   updateParticipant: (
     id: string,

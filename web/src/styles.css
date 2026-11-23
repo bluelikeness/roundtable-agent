@@ -1365,3 +1365,10 @@ code {
 .room-reveal .btn {
   align-self: flex-start;
 }
+.room-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--muted);
+}

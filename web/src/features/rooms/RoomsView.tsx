@@ -11,7 +11,7 @@ import {
   type RoomOut,
 } from "../../api/rooms";
 import { useMobile } from "../../lib/media";
-import { callText, inviteUrl } from "./callText";
+import { callText, inviteUrl, leaderText } from "./callText";
 import { mergeMsgs, RoomChat } from "./RoomChat";
 
 const POLL_MS = 3000;
@@ -80,12 +80,19 @@ function Participants({
   onReveal: (r: Reveal) => void;
 }) {
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<ParticipantKind>("ai");
+  // "leader" 는 팀장 AI(역할 leader 인 AI 참가자)
+  const [kind, setKind] = useState<ParticipantKind | "leader">("ai");
   const [err, setErr] = useState<string | null>(null);
   const closed = room.closed_at !== null;
 
   const revealKey = (p: ParticipantKeyOut, rotated: boolean) => {
-    if (p.kind === "ai") {
+    if (p.kind === "ai" && p.role === "leader") {
+      onReveal({
+        title: `팀장 ${p.name} 실행 방법`,
+        body: leaderText({ origin: window.location.origin, room: room.name, name: p.name, key: p.key }),
+        note: `${rotated ? "키를 바꿨어요. 예전 키는 이제 안 돼요. " : ""}팀장은 claude 가 로그인된 PC 에서 이 명령으로 돌려요. 키는 지금 한 번만 보여요.`,
+      });
+    } else if (p.kind === "ai") {
       onReveal({
         title: `${p.name}에게 보낼 부르는 말`,
         body: callText({ origin: window.location.origin, room: room.name, name: p.name, key: p.key, checkEverySec: p.check_every_s }),
@@ -105,7 +112,10 @@ function Participants({
     if (!n) return;
     setErr(null);
     try {
-      const p = await roomsApi.addParticipant(room.id, { name: n, kind });
+      const p = await roomsApi.addParticipant(
+        room.id,
+        kind === "leader" ? { name: n, kind: "ai", role: "leader" } : { name: n, kind },
+      );
       setName("");
       revealKey(p, false);
       onChange();
@@ -225,8 +235,9 @@ function Participants({
           <div className="muted small">참가자 넣기</div>
           <div className="row">
             <input aria-label="참가자 이름" placeholder="이름 (예: 클로)" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
-            <select aria-label="참가자 종류" value={kind} onChange={(e) => setKind(e.target.value as ParticipantKind)}>
+            <select aria-label="참가자 종류" value={kind} onChange={(e) => setKind(e.target.value as ParticipantKind | "leader")}>
               <option value="ai">AI</option>
+              <option value="leader">팀장 AI</option>
               <option value="human">사람</option>
             </select>
             <button className="btn small primary" disabled={!name.trim()}>
@@ -383,6 +394,21 @@ export function RoomsView({ roomId, me = null }: { roomId: string | null; me?: s
               {room?.closed_at && <span className="room-tag">닫힘</span>}
             </span>
             <span className="row">
+              {room && !room.closed_at && (
+                <label className="room-toggle small" title="켜면 팀장이 아닌 AI 는 @이름 으로 부른 글에만 답할 수 있어요">
+                  <input
+                    type="checkbox"
+                    checked={room.call_only}
+                    onChange={(e) =>
+                      void roomsApi
+                        .update(room.id, { call_only: e.target.checked })
+                        .then(loadRooms)
+                        .catch((x) => setErr(errText(x)))
+                    }
+                  />
+                  AI는 부를 때만
+                </label>
+              )}
               {mobile && (
                 <button className="btn small" onClick={() => setShowPeople((v) => !v)}>
                   참가자

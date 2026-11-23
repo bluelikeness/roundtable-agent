@@ -5,7 +5,7 @@
 운영자(로그인 쿠키):
   POST   /api/rooms                                  방 만들기 {name}
   GET    /api/rooms                                  방 목록
-  PATCH  /api/rooms/{room_id}                        이름 바꾸기 {name}
+  PATCH  /api/rooms/{room_id}                        이름 바꾸기·'부를 때만' {name?, call_only?}
   DELETE /api/rooms/{room_id}                        방 닫기(닫힌 방은 참가자 API 410)
   GET    /api/rooms/{room_id}/messages?since=        글 읽기
   GET    /api/rooms/{room_id}/participants           참가자 목록(키는 안 보임)
@@ -22,7 +22,10 @@
   POST /api/join/{invite} {name}    → {key, me, room} 사람 참가자로 넣고 키를 한 번 돌려준다
 
 참가자(헤더 x-key: <참가자 키>). 키가 곧 신원이라 다른 이름으로 쓸 수 없다:
-  GET  /api/p/msgs?since=<id>   → {me, kind, role, room, room_id, check_every_s, msgs:[{id, who, kind, text, ts}]}
+  GET  /api/p/msgs?since=<id>   → {me, kind, role, room, room_id, check_every_s, call_only, my_turn,
+                                   msgs:[{id, who, kind, text, ts, to_me}]}
+     to_me: 그 글이 나를(@내이름 또는 @모두) 불렀는지. my_turn: 내 마지막 글 이후 아직 답 안 한 부름이 있는지.
+  '부를 때만' 방에서 팀장이 아닌 AI 가 부름 없이 보내면 409 not_called (docs/proposals/open-rooms.md 3.4).
   POST /api/p/send {text}       → {id}
   GET  /api/p/participants      → [{name, kind, role, enabled, last_seen_at}]
 """
@@ -37,7 +40,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,9 +101,15 @@ class RoomIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class RoomPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    call_only: bool | None = None
+
+
 class RoomOut(BaseModel):
     id: uuid.UUID
     name: str
+    call_only: bool
     created_at: datetime
     closed_at: datetime | None
     invite_on: bool
@@ -152,6 +161,7 @@ def _room_out(r: Room) -> RoomOut:
     return RoomOut(
         id=r.id,
         name=r.name,
+        call_only=r.call_only,
         created_at=r.created_at,
         closed_at=r.closed_at,
         invite_on=r.invite_hash is not None,
@@ -171,14 +181,55 @@ def _p_out(p: Participant) -> ParticipantOut:
     )
 
 
-def _msg_out(m: RoomMessage) -> dict:
-    return {
+def _msg_out(m: RoomMessage, me: str | None = None) -> dict:
+    out = {
         "id": m.id,
         "who": m.who,
         "kind": m.kind.value,
         "text": m.text,
         "ts": m.created_at.isoformat(),
     }
+    if me is not None:
+        out["to_me"] = m.who != me and calls(m.text, me)
+    return out
+
+
+EVERYONE = ("모두", "all")
+
+
+def mentioned(text: str, name: str) -> bool:
+    """@name 이 글에 있고 바로 뒤가 이름을 잇는 글자가 아니면 참(@클로 가 @클로드 에 걸리지 않게)."""
+    tag = "@" + name
+    start = 0
+    while (i := text.find(tag, start)) >= 0:
+        j = i + len(tag)
+        if j >= len(text) or not (text[j].isalnum() or text[j] == "_"):
+            return True
+        start = i + 1
+    return False
+
+
+def calls(text: str, name: str) -> bool:
+    """이 글이 name 을 불렀는지: @name 또는 @모두."""
+    return mentioned(text, name) or any(mentioned(text, e) for e in EVERYONE)
+
+
+async def _pending_call(db: AsyncSession, p: Participant) -> bool:
+    """내 마지막 글 이후, 남이 나를 부른 글이 있는지."""
+    mine = (
+        await db.execute(
+            select(func.max(RoomMessage.id)).where(
+                RoomMessage.room_id == p.room_id, RoomMessage.participant_id == p.id
+            )
+        )
+    ).scalar() or 0
+    q = select(RoomMessage).where(
+        RoomMessage.room_id == p.room_id, RoomMessage.id > mine
+    )
+    for m in (await db.execute(q)).scalars():
+        if m.participant_id != p.id and calls(m.text, p.name):
+            return True
+    return False
 
 
 async def _read_msgs(
@@ -265,10 +316,13 @@ async def list_rooms(db: AsyncSession = Depends(get_db)) -> list[RoomOut]:
 
 @op_router.patch("/{room_id}", response_model=RoomOut)
 async def rename_room(
-    room_id: uuid.UUID, body: RoomIn, db: AsyncSession = Depends(get_db)
+    room_id: uuid.UUID, body: RoomPatch, db: AsyncSession = Depends(get_db)
 ) -> RoomOut:
     room = await _get_room(db, room_id)
-    room.name = body.name.strip()
+    if body.name is not None:
+        room.name = body.name.strip()
+    if body.call_only is not None:
+        room.call_only = body.call_only
     await db.commit()
     return _room_out(room)
 
@@ -533,6 +587,7 @@ async def p_msgs(
     if retry:
         return _too_many(retry)
     msgs = await _read_msgs(db, room.id, since, settings)
+    my_turn = await _pending_call(db, p)
     p.last_seen_at = datetime.now(UTC)
     await db.commit()
     return {
@@ -542,7 +597,9 @@ async def p_msgs(
         "room": room.name,
         "room_id": str(room.id),
         "check_every_s": p.check_every_s,
-        "msgs": [_msg_out(m) for m in msgs],
+        "call_only": room.call_only,
+        "my_turn": my_turn,
+        "msgs": [_msg_out(m, p.name) for m in msgs],
     }
 
 
@@ -555,6 +612,13 @@ async def p_send(
 ):
     p, room = await _participant_by_key(db, x_key)
     text = _clean_text(body.text, settings)
+    if (
+        room.call_only
+        and p.kind == ParticipantKind.ai
+        and p.role != ParticipantRole.leader
+        and not await _pending_call(db, p)
+    ):
+        raise HTTPException(409, "not_called")
     retry = _rate(_sends, p.id, settings.room_sends_per_minute)
     if retry:
         return _too_many(retry)

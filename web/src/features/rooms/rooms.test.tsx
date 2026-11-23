@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callText, inviteFromHash, inviteUrl, roomRoute } from "./callText";
+import { callText, inviteFromHash, inviteUrl, leaderText, roomRoute } from "./callText";
 import { JoinView, storageKey } from "./JoinView";
 import { mergeMsgs, RoomMessages } from "./RoomChat";
 
@@ -39,6 +39,16 @@ describe("주소·부르는 말", () => {
     expect(t).toContain("30초마다");
     expect(t).toContain("@클로");
     expect(t).toContain("멈춰");
+    expect(t).toContain("my_turn");
+    expect(t).toContain("409 not_called");
+  });
+
+  it("팀장 안내는 실행 명령과 키를 담는다", () => {
+    const t = leaderText({ origin: "https://hub.example", room: "토론방", name: "팀장", key: KEY });
+    expect(t).toContain("python -m app.room_leader");
+    expect(t).toContain(`ROOM_KEY='${KEY}'`);
+    expect(t).toContain("ROOM_URL='https://hub.example'");
+    expect(t).toContain("LEADER_MAX_TURNS");
   });
 });
 

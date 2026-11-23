@@ -210,6 +210,8 @@ class Room(Base):
     closed_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
     # 사람 초대 링크 키의 sha256. 비면 초대가 꺼져 있다
     invite_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # 'AI는 부를 때만': 켜면 팀장이 아닌 AI 는 자기를 부른(@이름) 글에만 답할 수 있다
+    call_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
 
 
 class Participant(Base):
