@@ -14,9 +14,11 @@ from app.models import Participant
 def _reset_rate():
     rooms_mod._reads.clear()
     rooms_mod._sends.clear()
+    rooms_mod._joins.clear()
     yield
     rooms_mod._reads.clear()
     rooms_mod._sends.clear()
+    rooms_mod._joins.clear()
     app.dependency_overrides.pop(get_settings, None)
 
 
@@ -238,3 +240,103 @@ async def test_history_window(authed):
         await authed.post("/api/p/send", json={"text": str(i)}, headers=_k(p["key"]))
     r = await authed.get("/api/p/msgs?since=0", headers=_k(p["key"]))
     assert [m["text"] for m in r.json()["msgs"]] == ["2", "3", "4"]
+
+
+# --- R2: 초대 링크, 운영자 글쓰기, 참가자 목록 ---
+
+
+async def _invite(authed, rid: str) -> str:
+    r = await authed.post(f"/api/rooms/{rid}/invite")
+    assert r.status_code == 200, r.text
+    return r.json()["invite"]
+
+
+async def test_invite_join_and_chat(client, authed):
+    rid = await _room(authed, "모임방")
+    ai = await _add(authed, rid, "클로")
+    inv = await _invite(authed, rid)
+    assert inv.startswith("ri_")
+    rooms = (await authed.get("/api/rooms")).json()
+    assert rooms[0]["invite_on"] is True
+
+    # 초대받은 사람은 로그인 없이 방 이름·참가자를 보고 이름만 써서 들어온다
+    await client.post("/api/auth/logout")
+    r = await client.get(f"/api/join/{inv}")
+    assert r.status_code == 200
+    assert r.json()["room"] == "모임방" and r.json()["people"] == [
+        {"name": "클로", "kind": "ai"}
+    ]
+    r = await client.post(f"/api/join/{inv}", json={"name": "철수"})
+    assert r.status_code == 201, r.text
+    human = r.json()["key"]
+    assert r.json()["me"] == "철수"
+
+    await client.post("/api/p/send", json={"text": "안녕 클로"}, headers=_k(human))
+    r = await client.get("/api/p/msgs", headers=_k(ai["key"]))
+    assert [(m["who"], m["kind"]) for m in r.json()["msgs"]] == [("철수", "human")]
+    r = await client.get("/api/p/participants", headers=_k(human))
+    assert {(p["name"], p["kind"]) for p in r.json()} == {
+        ("클로", "ai"),
+        ("철수", "human"),
+    }
+
+    # 같은 이름은 409
+    r = await client.post(f"/api/join/{inv}", json={"name": "철수"})
+    assert r.status_code == 409
+
+
+async def test_operator_send_shows_as_operator(authed):
+    rid = await _room(authed)
+    ai = await _add(authed, rid, "클로")
+    r = await authed.post(f"/api/rooms/{rid}/messages", json={"text": "@클로 시작해"})
+    assert r.status_code == 200
+    r = await authed.get("/api/p/msgs", headers=_k(ai["key"]))
+    assert [(m["who"], m["kind"], m["text"]) for m in r.json()["msgs"]] == [
+        ("operator", "human", "@클로 시작해")
+    ]
+
+
+async def test_invite_rotate_and_stop(client, authed):
+    rid = await _room(authed)
+    old = await _invite(authed, rid)
+    new = await _invite(authed, rid)
+    assert (await client.get(f"/api/join/{old}")).status_code == 404
+    assert (await client.get(f"/api/join/{new}")).status_code == 200
+    r = await authed.delete(f"/api/rooms/{rid}/invite")
+    assert r.json()["invite_on"] is False
+    assert (await client.get(f"/api/join/{new}")).status_code == 404
+    assert (await client.get("/api/join/garbage")).status_code == 404
+
+
+async def test_join_closed_room_410(client, authed):
+    rid = await _room(authed)
+    inv = await _invite(authed, rid)
+    await authed.delete(f"/api/rooms/{rid}")
+    assert (
+        await client.post(f"/api/join/{inv}", json={"name": "영희"})
+    ).status_code == 410
+
+
+async def test_room_full_and_join_rate(client, authed):
+    base = get_settings()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        **{**base.model_dump(), "room_max_participants": 2, "room_joins_per_minute": 3}
+    )
+    rid = await _room(authed)
+    inv = await _invite(authed, rid)
+    assert (
+        await client.post(f"/api/join/{inv}", json={"name": "a"})
+    ).status_code == 201
+    assert (
+        await client.post(f"/api/join/{inv}", json={"name": "b"})
+    ).status_code == 201
+    r = await client.post(f"/api/join/{inv}", json={"name": "c"})
+    assert r.status_code == 409 and r.json()["detail"] == "room_full"
+    r = await authed.post(
+        f"/api/rooms/{rid}/participants", json={"name": "d", "kind": "ai"}
+    )
+    assert r.status_code == 409
+    # 분당 입장 시도 상한(3회 시도 후 넷째는 429)
+    assert (
+        await client.post(f"/api/join/{inv}", json={"name": "e"})
+    ).status_code == 429

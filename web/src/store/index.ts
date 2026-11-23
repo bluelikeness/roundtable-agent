@@ -122,6 +122,8 @@ export function sessionFromHash(hash = window.location.hash): string | null {
 }
 
 function writeHash(sid: string | null) {
+  // 열린 방·초대 화면에 있을 때는 세션 주소로 덮어쓰지 않는다
+  if (/^#\/(rooms|join)(\/|$)/.test(window.location.hash)) return;
   const h = sid ? `#/s/${sid}` : "#/";
   if (window.location.hash !== h) history.replaceState(null, "", h);
 }

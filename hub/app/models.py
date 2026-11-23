@@ -208,6 +208,8 @@ class Room(Base):
     created_at: Mapped[datetime] = _ts()
     # 닫은 시각. 닫힌 방은 참가자 API 가 410 을 돌려준다
     closed_at: Mapped[datetime | None] = _ts(nullable=True, default_now=False)
+    # 사람 초대 링크 키의 sha256. 비면 초대가 꺼져 있다
+    invite_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
 
 
 class Participant(Base):

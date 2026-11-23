@@ -11,6 +11,7 @@ from app.bots_api import router as bots_router
 from app.config import get_settings
 from app.db import dispose_engine, get_sessionmaker
 from app.inbox import router as inbox_router
+from app.rooms import join_router
 from app.rooms import op_router as rooms_router
 from app.rooms import p_router as participant_router
 from app.runner_client import RemoteRunner
@@ -49,6 +50,7 @@ app.include_router(internal_router)
 app.include_router(inbox_router)
 app.include_router(rooms_router)
 app.include_router(participant_router)
+app.include_router(join_router)
 
 
 @app.get("/healthz")

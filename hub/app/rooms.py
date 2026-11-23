@@ -13,10 +13,18 @@
   PATCH  /api/rooms/{room_id}/participants/{pid}     역할·확인 간격·켜기/끄기
   POST   /api/rooms/{room_id}/participants/{pid}/rotate  키 재발급(옛 키 즉시 무효) → key
   DELETE /api/rooms/{room_id}/participants/{pid}     끊고 지우기(글은 남는다)
+  POST   /api/rooms/{room_id}/messages               운영자로 글 쓰기 {text}
+  POST   /api/rooms/{room_id}/invite                 사람 초대 링크 키 발급(다시 부르면 바뀌고 옛 링크 무효) → invite
+  DELETE /api/rooms/{room_id}/invite                 초대 링크 끄기
+
+초대받은 사람(로그인 없음, 초대 키가 곧 입장권):
+  GET  /api/join/{invite}           → {room, people:[{name, kind}]}
+  POST /api/join/{invite} {name}    → {key, me, room} 사람 참가자로 넣고 키를 한 번 돌려준다
 
 참가자(헤더 x-key: <참가자 키>). 키가 곧 신원이라 다른 이름으로 쓸 수 없다:
   GET  /api/p/msgs?since=<id>   → {me, kind, role, room, room_id, check_every_s, msgs:[{id, who, kind, text, ts}]}
   POST /api/p/send {text}       → {id}
+  GET  /api/p/participants      → [{name, kind, role, enabled, last_seen_at}]
 """
 
 import hashlib
@@ -36,13 +44,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import current_operator
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import Participant, ParticipantKind, ParticipantRole, Room, RoomMessage
+from app.models import (
+    Operator,
+    Participant,
+    ParticipantKind,
+    ParticipantRole,
+    Room,
+    RoomMessage,
+)
 
 KEY_PREFIX = "rk_"
+INVITE_PREFIX = "ri_"
 
 # 참가자별 최근 요청 시각(단일 프로세스 기준, inbox 와 같은 방식)
 _reads: dict[uuid.UUID, deque[float]] = {}
 _sends: dict[uuid.UUID, deque[float]] = {}
+# 방별 초대 입장 시도(초대 링크가 퍼졌을 때 참가자 폭주 방지)
+_joins: dict[uuid.UUID, deque[float]] = {}
 
 
 def new_key() -> str:
@@ -85,6 +103,16 @@ class RoomOut(BaseModel):
     name: str
     created_at: datetime
     closed_at: datetime | None
+    invite_on: bool
+
+
+class InviteOut(BaseModel):
+    # 원문 초대 키. 발급 응답에서만 보인다
+    invite: str
+
+
+class JoinIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
 
 
 class ParticipantIn(BaseModel):
@@ -121,7 +149,13 @@ class SendIn(BaseModel):
 
 
 def _room_out(r: Room) -> RoomOut:
-    return RoomOut(id=r.id, name=r.name, created_at=r.created_at, closed_at=r.closed_at)
+    return RoomOut(
+        id=r.id,
+        name=r.name,
+        created_at=r.created_at,
+        closed_at=r.closed_at,
+        invite_on=r.invite_hash is not None,
+    )
 
 
 def _p_out(p: Participant) -> ParticipantOut:
@@ -167,6 +201,24 @@ async def _read_msgs(
         q.where(RoomMessage.id > since)
         .order_by(RoomMessage.id)
         .limit(settings.room_page)
+    )
+    return list((await db.execute(q)).scalars().all())
+
+
+def _clean_text(raw: str, settings: Settings) -> str:
+    text = raw.strip()
+    if not text:
+        raise HTTPException(422, "empty_text")
+    if len(text) > settings.room_max_chars:
+        raise HTTPException(413, "too_long")
+    return text
+
+
+async def _people(db: AsyncSession, room_id: uuid.UUID) -> list[Participant]:
+    q = (
+        select(Participant)
+        .where(Participant.room_id == room_id)
+        .order_by(Participant.created_at)
     )
     return list((await db.execute(q)).scalars().all())
 
@@ -269,11 +321,16 @@ async def list_participants(
     "/{room_id}/participants", response_model=ParticipantKeyOut, status_code=201
 )
 async def add_participant(
-    room_id: uuid.UUID, body: ParticipantIn, db: AsyncSession = Depends(get_db)
+    room_id: uuid.UUID,
+    body: ParticipantIn,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> ParticipantKeyOut:
     room = await _get_room(db, room_id)
     if room.closed_at is not None:
         raise HTTPException(409, "room_closed")
+    if len(await _people(db, room.id)) >= settings.room_max_participants:
+        raise HTTPException(409, "room_full")
     key = new_key()
     p = Participant(
         room_id=room.id,
@@ -335,6 +392,110 @@ async def remove_participant(
     _sends.pop(pid, None)
 
 
+@op_router.post("/{room_id}/messages")
+async def operator_send(
+    room_id: uuid.UUID,
+    body: SendIn,
+    op: Operator = Depends(current_operator),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    room = await _get_room(db, room_id)
+    if room.closed_at is not None:
+        raise HTTPException(409, "room_closed")
+    text = _clean_text(body.text, settings)
+    m = RoomMessage(
+        room_id=room.id,
+        participant_id=None,
+        who=op.username[:40],
+        kind=ParticipantKind.human,
+        text=text,
+    )
+    db.add(m)
+    await db.commit()
+    return {"id": m.id}
+
+
+@op_router.post("/{room_id}/invite", response_model=InviteOut)
+async def make_invite(
+    room_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> InviteOut:
+    room = await _get_room(db, room_id)
+    if room.closed_at is not None:
+        raise HTTPException(409, "room_closed")
+    invite = INVITE_PREFIX + secrets.token_urlsafe(24)
+    room.invite_hash = hash_key(invite)
+    await db.commit()
+    return InviteOut(invite=invite)
+
+
+@op_router.delete("/{room_id}/invite", response_model=RoomOut)
+async def stop_invite(
+    room_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> RoomOut:
+    room = await _get_room(db, room_id)
+    room.invite_hash = None
+    await db.commit()
+    return _room_out(room)
+
+
+# --- 초대받은 사람 ---
+
+join_router = APIRouter(prefix="/api/join")
+
+
+async def _room_by_invite(db: AsyncSession, invite: str) -> Room:
+    if not invite.startswith(INVITE_PREFIX):
+        raise HTTPException(404, "invite_not_found")
+    room = (
+        await db.execute(select(Room).where(Room.invite_hash == hash_key(invite)))
+    ).scalar_one_or_none()
+    if room is None:
+        raise HTTPException(404, "invite_not_found")
+    if room.closed_at is not None:
+        raise HTTPException(410, "room_closed")
+    return room
+
+
+@join_router.get("/{invite}")
+async def join_info(invite: str, db: AsyncSession = Depends(get_db)) -> dict:
+    room = await _room_by_invite(db, invite)
+    people = await _people(db, room.id)
+    return {
+        "room": room.name,
+        "people": [{"name": p.name, "kind": p.kind.value} for p in people],
+    }
+
+
+@join_router.post("/{invite}", status_code=201)
+async def join(
+    invite: str,
+    body: JoinIn,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    room = await _room_by_invite(db, invite)
+    retry = _rate(_joins, room.id, settings.room_joins_per_minute)
+    if retry:
+        return _too_many(retry)
+    if len(await _people(db, room.id)) >= settings.room_max_participants:
+        raise HTTPException(409, "room_full")
+    key = new_key()
+    p = Participant(
+        room_id=room.id,
+        name=body.name.strip(),
+        kind=ParticipantKind.human,
+        key_hash=hash_key(key),
+    )
+    db.add(p)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "name_taken") from None
+    return JSONResponse({"key": key, "me": p.name, "room": room.name}, status_code=201)
+
+
 # --- 참가자(키) ---
 
 p_router = APIRouter(prefix="/api/p")
@@ -393,11 +554,7 @@ async def p_send(
     settings: Settings = Depends(get_settings),
 ):
     p, room = await _participant_by_key(db, x_key)
-    text = body.text.strip()
-    if not text:
-        raise HTTPException(422, "empty_text")
-    if len(text) > settings.room_max_chars:
-        raise HTTPException(413, "too_long")
+    text = _clean_text(body.text, settings)
     retry = _rate(_sends, p.id, settings.room_sends_per_minute)
     if retry:
         return _too_many(retry)
@@ -408,3 +565,25 @@ async def p_send(
     p.last_seen_at = datetime.now(UTC)
     await db.commit()
     return {"id": m.id}
+
+
+@p_router.get("/participants")
+async def p_participants(
+    x_key: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    p, room = await _participant_by_key(db, x_key)
+    retry = _rate(_reads, p.id, settings.room_reads_per_minute)
+    if retry:
+        return _too_many(retry)
+    return [
+        {
+            "name": x.name,
+            "kind": x.kind.value,
+            "role": x.role.value,
+            "enabled": x.enabled,
+            "last_seen_at": x.last_seen_at.isoformat() if x.last_seen_at else None,
+        }
+        for x in await _people(db, room.id)
+    ]

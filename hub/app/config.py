@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # since=0(처음 읽기)일 때 돌려주는 최근 글 수, 한 번에 돌려주는 최대 글 수
     room_history: int = 50
     room_page: int = 200
+    # 한 방의 참가자 상한(사람+AI, 운영자 제외)과 초대 링크로 들어오는 분당 입장 수
+    room_max_participants: int = 20
+    room_joins_per_minute: int = 5
 
     def read_adapter_token(self) -> str:
         if self.adapter_token:
