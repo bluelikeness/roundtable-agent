@@ -3,7 +3,10 @@
 name: roundtable
 
 # Mock 어댑터 공통 정의 (docs/03-adapters.md 10장). 이름만 바꿔 여러 개 띄운다.
+# 운영 스택에는 띄우지 않는다(profiles: mock). 써 보려면 docker compose --profile mock up -d 와
+# hub/bots.yaml 등록. 계약 테스트는 서비스 이름을 직접 줘서 띄우고, 평가·E2E 는 자기 compose 를 쓴다
 x-mock-adapter: &mock-adapter
+  profiles: [mock]
   build:
     context: ./adapters
     dockerfile: mock/Dockerfile

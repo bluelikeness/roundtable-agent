@@ -15,7 +15,7 @@ RAND_HEX = head -c $(1) /dev/urandom | od -An -tx1 | tr -d ' \n'
 
 .PHONY: up down logs ps test test-hub test-runner test-adapters test-web eval e2e types admin runner-login
 
-up:  ## 로컬 스택 기동 (postgres, hub-api, runner, web, mock-a/b/c)
+up:  ## 로컬 스택 기동 (postgres, hub-api, runner, web, 봇 어댑터). 목업은 --profile mock 으로만
 	$(COMPOSE) up -d --build --wait
 
 down:
