@@ -264,8 +264,9 @@ flowchart LR
    and enable notification access and the accessibility service. Details: [phone/README.md](phone/README.md).
 6. Open `https://<your domain>`, sign in, create a room — done.
 
-> Want to try it with fake assistants first? Stop after step 3, open `http://127.0.0.1:8080` and send
-> "ask mock-a and mock-b about the weather".
+> Want to try it with fake assistants first? Stop after step 3, start them with
+> `docker compose --profile mock up -d`, register `mock-a` and `mock-b` in `hub/bots.yaml`,
+> then open `http://127.0.0.1:8080` and send "ask mock-a and mock-b about the weather".
 
 ---
 

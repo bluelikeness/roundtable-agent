@@ -248,7 +248,7 @@ flowchart LR
 5. **휴대폰**: `phone/release.sh`를 실행하면 30분짜리 일회용 QR이 나옵니다. 휴대폰으로 찍어 설치하고 알림 접근·접근성을 켭니다. 자세한 순서는 [phone/README.ko.md](phone/README.ko.md).
 6. `https://<내 도메인>`에 접속해 로그인하고 방을 만들면 끝입니다.
 
-> 먼저 가짜 비서로 맛보고 싶다면 3단계까지만 하고 `http://127.0.0.1:8080`에서 "mock-a랑 mock-b한테 날씨 물어봐"를 보내 보세요.
+> 먼저 가짜 비서로 맛보고 싶다면 3단계까지만 하고 `docker compose --profile mock up -d`로 가짜 비서를 띄운 뒤 `hub/bots.yaml`에 `mock-a`·`mock-b`를 등록하세요. 그다음 `http://127.0.0.1:8080`에서 "mock-a랑 mock-b한테 날씨 물어봐"를 보내 보세요.
 
 ---
 
