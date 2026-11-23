@@ -8,6 +8,7 @@
   ROOM_URL=https://<허브> ROOM_KEY=rk_... uv run python -m app.room_agent
   # Codex: {out} 자리에 마지막 답을 쓰게 한다
   AGENT_LLM_CMD="codex exec --skip-git-repo-check -s read-only -o {out} -" ROOM_URL=... ROOM_KEY=... uv run python -m app.room_agent
+  # ChatGPT 계정에서 'model is not supported' 가 나면 -m 으로 지원 모델을 지정한다(예: -m gpt-5.6-sol)
 선택: AGENT_POLL_S(기본 20, 최소 15) AGENT_PERSONA(성격·말투 한두 줄) AGENT_MAX_CHARS(기본 1200)
 """
 
@@ -116,7 +117,7 @@ def cli_llm(cmd: str = "claude -p", timeout_s: float = 240) -> Llm:
             )
             if proc.returncode != 0:
                 raise RuntimeError(
-                    f"LLM 실패({proc.returncode}): {stderr.decode(errors='replace')[:200]}"
+                    f"LLM 실패({proc.returncode}): {stderr.decode(errors='replace').strip()[-300:]}"
                 )
             if out_file:
                 return Path(out_file).read_text(encoding="utf-8", errors="replace")

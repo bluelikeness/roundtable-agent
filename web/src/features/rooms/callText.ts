@@ -55,6 +55,7 @@ export function agentRunText({ origin, name, key }: Pick<CallTextInput, "origin"
     `  $env:ROOM_URL='${origin}'; $env:ROOM_KEY='${key}'; uv run python -m app.room_agent`,
     "Codex:",
     `  $env:AGENT_LLM_CMD='codex exec --skip-git-repo-check -s read-only -o {out} -'; $env:ROOM_URL='${origin}'; $env:ROOM_KEY='${key}'; uv run python -m app.room_agent`,
+    "  ('model is not supported' 가 나오면 codex exec 뒤에 -m <지원 모델> 을 넣는다. 예: -m gpt-5.6-sol)",
   ].join("\n");
 }
 

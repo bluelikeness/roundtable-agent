@@ -210,7 +210,7 @@ def claude_cli(cmd: str = "claude -p") -> Llm:
         )
         if proc.returncode != 0:
             raise RuntimeError(
-                f"LLM 실패({proc.returncode}): {err.decode(errors='replace')[:200]}"
+                f"LLM 실패({proc.returncode}): {err.decode(errors='replace').strip()[-300:]}"
             )
         return out.decode(errors="replace")
 
