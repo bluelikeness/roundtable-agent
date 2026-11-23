@@ -41,6 +41,8 @@ describe("주소·부르는 말", () => {
     expect(t).toContain("멈춰");
     expect(t).toContain("my_turn");
     expect(t).toContain("409 not_called");
+    expect(t).toContain(`https://hub.example/api/p/read?k=${KEY}`);
+    expect(t).toContain(`https://hub.example/api/p/say?k=${KEY}&text=`);
   });
 
   it("팀장 안내는 실행 명령과 키를 담는다", () => {

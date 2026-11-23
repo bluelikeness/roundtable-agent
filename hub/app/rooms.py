@@ -37,8 +37,8 @@ import uuid
 from collections import deque
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -575,17 +575,14 @@ async def _participant_by_key(
     return p, room
 
 
-@p_router.get("/msgs")
-async def p_msgs(
-    since: int = Query(0, ge=0),
-    x_key: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    p, room = await _participant_by_key(db, x_key)
-    retry = _rate(_reads, p.id, settings.room_reads_per_minute)
-    if retry:
-        return _too_many(retry)
+def _key(x_key: str | None, k: str | None) -> str | None:
+    """헤더(x-key)가 기본. 헤더를 못 붙이는 앱(폰 비서 등)을 위해 ?k= 도 받는다."""
+    return x_key or k
+
+
+async def _read_state(
+    db: AsyncSession, p: Participant, room: Room, since: int, settings: Settings
+) -> dict:
     msgs = await _read_msgs(db, room.id, since, settings)
     my_turn = await _pending_call(db, p)
     p.last_seen_at = datetime.now(UTC)
@@ -603,15 +600,10 @@ async def p_msgs(
     }
 
 
-@p_router.post("/send")
-async def p_send(
-    body: SendIn,
-    x_key: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    p, room = await _participant_by_key(db, x_key)
-    text = _clean_text(body.text, settings)
+async def _say(
+    db: AsyncSession, p: Participant, room: Room, raw: str, settings: Settings
+) -> int | JSONResponse:
+    text = _clean_text(raw, settings)
     if (
         room.call_only
         and p.kind == ParticipantKind.ai
@@ -628,16 +620,151 @@ async def p_send(
     db.add(m)
     p.last_seen_at = datetime.now(UTC)
     await db.commit()
-    return {"id": m.id}
+    return m.id
+
+
+@p_router.get("/msgs")
+async def p_msgs(
+    since: int = Query(0, ge=0),
+    x_key: str | None = Header(default=None),
+    k: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    p, room = await _participant_by_key(db, _key(x_key, k))
+    retry = _rate(_reads, p.id, settings.room_reads_per_minute)
+    if retry:
+        return _too_many(retry)
+    return await _read_state(db, p, room, since, settings)
+
+
+@p_router.post("/send")
+async def p_send(
+    body: SendIn,
+    x_key: str | None = Header(default=None),
+    k: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    p, room = await _participant_by_key(db, _key(x_key, k))
+    out = await _say(db, p, room, body.text, settings)
+    return out if isinstance(out, JSONResponse) else {"id": out}
+
+
+# --- 링크만 여는 AI 용(헤더·POST 를 못 쓰는 폰 비서 앱 등). 키가 주소에 들어가니 믿는 앱에만 준다 ---
+
+_LINK_ERR = {
+    "invalid_key": "키가 맞지 않아요. 방 주인에게 새 링크를 받아 주세요.",
+    "room_closed": "방이 닫혔어요. 더 이상 읽고 쓸 수 없어요.",
+    "participant_paused": "방 주인이 잠깐 빼 두었어요. 나중에 다시 확인해 주세요.",
+    "not_called": "아직 당신을 부르지 않았어요. 누가 @이름 으로 부르면 그때 답해 주세요.",
+    "empty_text": "보낼 말(text)이 비었어요.",
+    "too_long": "글이 너무 길어요. 줄여 주세요.",
+}
+
+
+def _plain(text: str, status_code: int = 200) -> PlainTextResponse:
+    return PlainTextResponse(
+        text, status_code=status_code, headers={"Cache-Control": "no-store"}
+    )
+
+
+def _link_error(e: HTTPException) -> PlainTextResponse:
+    return _plain(
+        f"오류({e.status_code}): {_LINK_ERR.get(str(e.detail), str(e.detail))}",
+        e.status_code,
+    )
+
+
+@p_router.get("/read")
+async def p_read(
+    request: Request,
+    k: str = Query(...),
+    since: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """읽기 쉬운 글자 페이지: 방 상황 + 최근 글 + 답하는 방법(링크)."""
+    try:
+        p, room = await _participant_by_key(db, k)
+    except HTTPException as e:
+        return _link_error(e)
+    if _rate(_reads, p.id, settings.room_reads_per_minute):
+        return _plain("너무 자주 확인했어요. 1분 뒤 다시 열어 주세요.", 429)
+    st = await _read_state(db, p, room, since, settings)
+    base = settings.public_url.rstrip("/") or str(request.base_url).rstrip("/")
+    say = f"{base}/api/p/say?k={k}"
+    again = f"{base}/api/p/read?k={k}&since="
+    lines = [
+        f"방: {st['room']}  /  나: {st['me']}"
+        + ("  /  팀장" if st["role"] == "leader" else ""),
+        "규칙: "
+        + (
+            "나를 @이름 으로 부른 글에만 답한다."
+            if st["call_only"]
+            else "나를 부르면 답한다."
+        )
+        + " 짧게(5문장 이내), 한 번에 한 번.",
+        f"지금 내 차례: {'예 — 아래 [나를 부름] 글에 답해 주세요' if st['my_turn'] else '아니요 — 기다려 주세요'}",
+        "",
+        "— 최근 글 (아래가 최신) —",
+    ]
+    for m in st["msgs"]:
+        mark = " [나를 부름]" if m.get("to_me") else ""
+        lines.append(f"#{m['id']} {m['who']}{mark}: {m['text']}")
+    if not st["msgs"]:
+        lines.append("(새 글 없음)")
+    last = st["msgs"][-1]["id"] if st["msgs"] else since
+    lines += [
+        "",
+        "— 답하는 방법 —",
+        f"이 주소 끝에 &text=<할 말(URL 인코딩)> 을 붙여 열면 방에 올라가요:\n{say}&text=",
+        f"새 글만 다시 보려면: {again}{last}",
+    ]
+    return _plain("\n".join(lines))
+
+
+@p_router.get("/say", name="p_say")
+async def p_say(
+    k: str = Query(...),
+    text: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """링크를 열면 글이 올라간다(GET). 같은 글을 1분 안에 다시 열면 한 번만 올린다."""
+    try:
+        p, room = await _participant_by_key(db, k)
+        recent = (
+            await db.execute(
+                select(RoomMessage)
+                .where(RoomMessage.participant_id == p.id)
+                .order_by(RoomMessage.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if (
+            recent is not None
+            and recent.text == text.strip()
+            and (datetime.now(UTC) - recent.created_at).total_seconds() < 60
+        ):
+            # 미리보기·새로고침으로 같은 링크가 또 열려도 중복으로 올리지 않는다
+            return _plain(f"이미 올렸어요 (#{recent.id}).")
+        out = await _say(db, p, room, text, settings)
+    except HTTPException as e:
+        return _link_error(e)
+    if isinstance(out, JSONResponse):
+        return _plain("너무 자주 보냈어요. 1분 뒤 다시 해 주세요.", 429)
+    return _plain(f"방에 올렸어요 (#{out}).")
 
 
 @p_router.get("/participants")
 async def p_participants(
     x_key: str | None = Header(default=None),
+    k: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    p, room = await _participant_by_key(db, x_key)
+    p, room = await _participant_by_key(db, _key(x_key, k))
     retry = _rate(_reads, p.id, settings.room_reads_per_minute)
     if retry:
         return _too_many(retry)

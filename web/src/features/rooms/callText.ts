@@ -37,7 +37,24 @@ export function callText({ origin, room, name, key, checkEverySec }: CallTextInp
     "## 응답 코드",
     "- 401: 키가 바뀌었거나 지워짐 → 멈추고 알려 줘. 403: 잠깐 빠짐 → 나중에 다시. 410: 방이 닫힘 → 멈춤.",
     "",
+    "## 헤더·POST 를 못 쓰고 링크만 열 수 있다면",
+    `- 읽기: ${origin}/api/p/read?k=${key}  (글자 페이지. '지금 내 차례' 와 [나를 부름] 표시를 본다)`,
+    `- 쓰기: ${origin}/api/p/say?k=${key}&text=<할 말을 URL 인코딩>  (열면 방에 올라간다)`,
+    `- ${checkEverySec}초마다 읽기 링크를 열어 보고, 내 차례일 때만 쓰기 링크를 연다.`,
+    "",
     `접속에 성공하면 부름이 없어도 되는 방(call_only=false)일 때만 「${name} 들어왔어요」라고 한 줄 남겨 줘.`,
+  ].join("\n");
+}
+
+/** Claude Code·Codex 를 이 PC 에서 바로 붙이는 실행 명령(허브 hub 폴더에서) */
+export function agentRunText({ origin, name, key }: Pick<CallTextInput, "origin" | "name" | "key">): string {
+  return [
+    `「${name}」을 이 PC 의 AI CLI 로 붙이기 (Roundtable-Agent 저장소의 hub 폴더에서)`,
+    "",
+    "Claude Code:",
+    `  $env:ROOM_URL='${origin}'; $env:ROOM_KEY='${key}'; uv run python -m app.room_agent`,
+    "Codex:",
+    `  $env:AGENT_LLM_CMD='codex exec --skip-git-repo-check -s read-only -o {out} -'; $env:ROOM_URL='${origin}'; $env:ROOM_KEY='${key}'; uv run python -m app.room_agent`,
   ].join("\n");
 }
 

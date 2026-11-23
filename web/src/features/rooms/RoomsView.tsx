@@ -11,7 +11,7 @@ import {
   type RoomOut,
 } from "../../api/rooms";
 import { useMobile } from "../../lib/media";
-import { callText, inviteUrl, leaderText } from "./callText";
+import { agentRunText, callText, inviteUrl, leaderText } from "./callText";
 import { mergeMsgs, RoomChat } from "./RoomChat";
 
 const POLL_MS = 3000;
@@ -95,7 +95,12 @@ function Participants({
     } else if (p.kind === "ai") {
       onReveal({
         title: `${p.name}에게 보낼 부르는 말`,
-        body: callText({ origin: window.location.origin, room: room.name, name: p.name, key: p.key, checkEverySec: p.check_every_s }),
+        body: [
+          callText({ origin: window.location.origin, room: room.name, name: p.name, key: p.key, checkEverySec: p.check_every_s }),
+          "",
+          "---- (참고) 이 PC 의 Claude Code·Codex 로 바로 붙이려면 ----",
+          agentRunText({ origin: window.location.origin, name: p.name, key: p.key }),
+        ].join("\n"),
         note: `${rotated ? "키를 바꿨어요. 예전 키는 이제 안 돼요. " : ""}이 글을 ${p.name} AI 에게 그대로 붙여 넣으세요. 키는 지금 한 번만 보여요.`,
       });
     } else {
