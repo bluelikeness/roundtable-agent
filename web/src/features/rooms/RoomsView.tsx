@@ -88,7 +88,7 @@ function Participants({
   const revealKey = (p: ParticipantKeyOut, rotated: boolean) => {
     if (p.kind === "ai" && p.role === "leader") {
       onReveal({
-        title: `팀장 ${p.name} 실행 방법`,
+        title: `${p.name} (팀장) 실행 방법`,
         body: leaderText({ origin: window.location.origin, room: room.name, name: p.name, key: p.key }),
         note: `${rotated ? "키를 바꿨어요. 예전 키는 이제 안 돼요. " : ""}팀장은 claude 가 로그인된 PC 에서 이 명령으로 돌려요. 키는 지금 한 번만 보여요.`,
       });
