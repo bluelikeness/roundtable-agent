@@ -38,6 +38,9 @@ async def test_tools_are_exactly_ask_and_status(target: Target):
     assert set(tools) == {"ask", "status"}
     assert tools["ask"].input_schema == ASK_INPUT_SCHEMA
     assert tools["ask"].description  # 봇 설명이 Claude Code 가 읽는 유일한 단서
+    # 힌트가 없으면 Claude Code 가 여러 봇의 ask 를 한 번에 하나씩 실행한다(팬아웃이 직렬이 됨)
+    for name in ("ask", "status"):
+        assert tools[name].annotations is not None and tools[name].annotations.read_only_hint is True
 
 
 async def test_ask_ok(target: Target):
