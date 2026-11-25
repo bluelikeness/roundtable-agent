@@ -232,6 +232,8 @@ flowchart TB
 | ⑤ | Add `- {name: <name>, mcp_url: http://<name>:9000/mcp, admin_url: http://<name>:9100, aliases: [nickname]}` to `hub/bots.yaml` | This name becomes Claude's tool name |
 | ⑥ | `docker compose up -d --build`, then check the bot panel | In a room: "say hi to the new assistant" |
 
+**Apps on another phone** (say, Pickle on a tablet) can join the same rooms. Several phones connect to one server at once. When you copy the service in ④, set `PHONE_DEVICE` to part of that phone's name (e.g. `SM-X910`), and register it in ⑤ under a different name (e.g. `pickle-tab`). A phone's name is "model · first 6 characters of its device ID", so two phones of the same model are told apart. Without `PHONE_DEVICE` the adapter uses the default phone chosen in the web bot panel. Full example: [phone worker design, section 12](docs/proposals/phone-worker.md).
+
 The profile card (`description`) *is* the assistant's identity — see [section 3](#3-giving-each-assistant-an-identity).
 
 ---
@@ -263,7 +265,8 @@ flowchart LR
 4. **Account and Claude**: `make admin ARGS="create-operator --username me"` creates your account and shows a
    TOTP secret for your authenticator app. `make runner-login` signs Claude Code in (once).
 5. **Phone**: `phone/release.sh` prints a one-time QR code valid for 30 minutes. Scan it on the phone, install,
-   and enable notification access and the accessibility service. Details: [phone/README.md](phone/README.md).
+   and enable notification access and the accessibility service. To add another phone, make a new QR and install
+   the same way. Details: [phone/README.md](phone/README.md).
 6. Open `https://<your domain>`, sign in, create a room — done.
 
 > Want to try it with fake assistants first? Stop after step 3, start them with

@@ -16,7 +16,7 @@ sequenceDiagram
   participant G as phone-gateway
   participant W as Worker (phone)
   participant APP as Assistant app
-  W->>G: WSS /phone/ws + device token, hello {device, sdk}
+  W->>G: WSS /phone/ws + device token, hello {device, device_id, sdk}
   loop every 15 s
     W-->>G: heartbeat
   end
@@ -63,8 +63,9 @@ Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when re
 - Builds (version code = seconds since 2026-01-01) and publishes to `phone/dist/`. `phone-gateway` serves
   this folder for worker auto-updates.
 - Creates a one-time install link valid for 30 minutes and a QR code (`phone/dist/qr.png`). Because the APK
-  contains the device token, there is no public download link.
-- Sends `update_check` to the connected phone. The worker also checks by itself on connect and every 6 hours.
+  contains the device token, there is no public download link. Android browsers hand the download to the
+  download manager, which requests the same URL again, so the link can be fetched again for 2 minutes after first use.
+- Sends `update_check` to every connected phone. The worker also checks by itself on connect and every 6 hours.
 - The worker downloads the new version with its device token, verifies the SHA-256 and installs it with
   PackageInstaller. On Android 14+ the `UPDATE_PACKAGES_WITHOUT_USER_ACTION` permission lets it install
   without a prompt; the accessibility service comes back on after the update and reconnects by itself
@@ -83,6 +84,8 @@ Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when re
 ## Behavior
 
 - Connection: reconnects with exponential backoff from 1 to 30 seconds. Heartbeat every 15 seconds.
+- Several phones: one gateway accepts several phones at once. Each is named "model · first 6 characters of `ANDROID_ID`"
+  and has its own screen turns and notifications. An adapter picks a phone with `PHONE_DEVICE`, otherwise the default phone.
 - Commands: `state` (screen, lock, foreground app, keyboard position), `watch`, `launch` (launcher intent),
   `tree` (the app window's accessibility tree as uiautomator-dump XML), `tap`, `set_text`, `paste` (clears the
   clipboard after pasting), `global` (home, back), `screenshot` (Android 11+).
