@@ -32,7 +32,7 @@ export function Login() {
   return (
     <main className="login">
       <form onSubmit={onSubmit}>
-        <h1>Roundtable-Agent</h1>
+        <h1>원탁</h1>
         <label>
           아이디
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
