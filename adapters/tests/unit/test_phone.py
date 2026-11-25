@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 
 import httpx
 import pytest
@@ -86,73 +87,135 @@ async def test_phone_ws_rejects_wrong_device_token(stack):
     assert gw.link is not None and gw.link.device == "fake-phone"  # 기존 연결은 그대로
 
 
-async def test_other_phone_is_turned_away_while_first_is_alive(stack):
-    """같은 토큰의 다른 휴대폰은 거절(4423)한다. 서로 밀어내며 끝없이 재연결하지 않게. 같은 휴대폰 재연결은 교체."""
-    base, gw, _ = stack
+async def _second_phone(
+    base: str, gw: Gateway, name: str, device_id: str | None = None
+) -> tuple[FakePhone, asyncio.Task]:
+    """다른 휴대폰을 하나 더 붙인다(게이트웨이가 받고 watch 까지 끝날 때까지 기다린다)."""
+    key = f"{name} · {device_id[:6]}" if device_id else name
+    before = gw.phones.get(key)
+    old = before.link if before else None
     other = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
-    other.device_name = "other-phone"
-    with pytest.raises(Exception):
-        await asyncio.wait_for(other.run_once(), 5)
-    assert gw.link is not None and gw.link.device == "fake-phone" and not gw.link.closed
-
-
-async def test_preferred_phone_takes_over(stack, monkeypatch):
-    """PHONE_PREFER_DEVICE 의 휴대폰은 붙어 있던 다른 휴대폰을 끊고 자리를 넘겨받는다. 끊긴 쪽은 다시 거절된다."""
-    base, gw, _ = stack
-    monkeypatch.setenv("PHONE_PREFER_DEVICE", "ULTRA")
-    pref = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
-    pref.device_name = "samsung ULTRA-25"
-    task = asyncio.create_task(pref.run_once())
-    for _ in range(100):
-        if gw.link is not None and gw.link.device == "samsung ULTRA-25":
+    other.device_name = name
+    other.device_id = device_id
+    task = asyncio.create_task(other.run_forever())
+    for _ in range(200):
+        p = gw.phones.get(key)
+        if p is not None and p.online and p.link is not old and other.watch:
             break
-        await asyncio.sleep(0.05)
-    assert gw.link is not None and gw.link.device == "samsung ULTRA-25"
-    # 밀려난 휴대폰이 다시 붙으려 하면 거절
-    again = FakePhone(base.replace("http", "ws") + "/phone/ws", DEV, FakeVooyDevice())
-    again.device_name = "fake-phone"
-    with pytest.raises(Exception):
-        await asyncio.wait_for(again.run_once(), 5)
-    assert gw.link.device == "samsung ULTRA-25"
-    task.cancel()
+        await asyncio.sleep(0.02)
+    return other, task
 
 
-async def test_prefer_phone_changed_at_runtime(stack, tmp_path):
-    """화면에서 우선 휴대폰을 바꾸면 지금 폰을 끊고, 우선 폰이 붙으면 자리를 넘긴다. 고른 값과 목록은 재시작 뒤에도 남는다."""
+async def test_two_phones_connect_together(stack):
+    """여러 휴대폰이 함께 붙는다. 기본 폰은 먼저 붙은 폰. 같은 휴대폰의 재연결은 이전 연결을 대신한다."""
     base, gw, phone = stack
-    ws_url = base.replace("http", "ws") + "/phone/ws"
-    # 거절된 폰도 목록에 남는다
-    other = FakePhone(ws_url, DEV, FakeVooyDevice())
-    other.device_name = "samsung NOTE-9"
-    with pytest.raises(Exception):
-        await asyncio.wait_for(other.run_once(), 5)
-    async with _client(base) as c:
-        d = (await c.get("/devices")).json()
-        assert d["current"] == "fake-phone" and d["prefer"] == ""
-        assert {r["device"] for r in d["devices"]} == {"fake-phone", "samsung NOTE-9"}
-        assert (await c.put("/prefer", json={"device": 3})).status_code == 400
+    other, task = await _second_phone(base, gw, "samsung SM-X910")
+    try:
+        assert {p.name for p in gw.online()} == {"fake-phone", "samsung SM-X910"}
+        assert gw.link is not None and gw.link.device == "fake-phone"
+        async with _client(base) as c:
+            d = (await c.get("/devices")).json()
+            assert d["current"] == "fake-phone"
+            assert all(r["connected"] for r in d["devices"])
+            st = (await c.get("/state", params={"device": "SM-X910"})).json()
+            assert st["connected"] and st["device"] == "samsung SM-X910"
+            assert set(st["phones"]) == {"fake-phone", "samsung SM-X910"}
+            # 붙어 있지 않은 폰을 고르면 연결 안 됨
+            assert not (await c.get("/state", params={"device": "NOPE"})).json()["connected"]
+            r = await c.post("/rpc", json={"cmd": "state", "device": "NOPE"})
+            assert r.status_code == 503 and "NOPE" in r.json()["error"]
+        # 같은 휴대폰이 다시 붙으면 교체(다른 폰은 그대로)
+        first = gw.phones["samsung SM-X910"].link
+        again, t2 = await _second_phone(base, gw, "samsung SM-X910")
+        assert gw.phones["samsung SM-X910"].link is not first and gw.phones["fake-phone"].online
+        t2.cancel()
+    finally:
+        task.cancel()
 
-        first = gw.link
-        d = (await c.put("/prefer", json={"device": "samsung NOTE-9"})).json()
-        assert d["prefer"] == "samsung NOTE-9"
-        assert next(r for r in d["devices"] if r["device"] == "samsung NOTE-9")["preferred"] is True
-    # 지금 폰(fake-phone)은 끊긴다. 우선 폰이 없으니 다시 붙는다(먼저 붙은 폰을 지킨다)
+
+async def test_same_model_phones_are_told_apart_by_device_id(stack):
+    """같은 모델 두 대도 기기 ID 로 가른다. 이름은 "모델 · ID 앞 6자", 어댑터는 ID 일부·전체로 고른다.
+    기기 ID 를 보내는 워커로 바뀌면 모델 이름만 있던 옛 목록 줄은 지운다."""
+    base, gw, phone = stack
+    gw.known["samsung SM-N960N"] = {"version": "old"}  # 옛 워커 시절 줄
+    a, ta = await _second_phone(base, gw, "samsung SM-N960N", "aaaaaa1111")
+    b, tb = await _second_phone(base, gw, "samsung SM-N960N", "bbbbbb2222")
+    pb = PhoneDevice(base_url=base, token=HUB, holder="b", phone="bbbbbb2222")
+    try:
+        names = {p.name for p in gw.online()}
+        assert {"samsung SM-N960N · aaaaaa", "samsung SM-N960N · bbbbbb"} <= names
+        assert "samsung SM-N960N" not in gw.known and "samsung SM-N960N · aaaaaa" in gw.known
+        async with _client(base) as c:
+            st = (await c.get("/state", params={"device": "aaaaaa"})).json()
+            assert st["name"] == "samsung SM-N960N · aaaaaa" and st["device"] == "samsung SM-N960N"
+        await pb.app_start("com.vooy.mobile")
+        assert b.vooy.foreground and not a.vooy.foreground
+        cur = await pb.events_cursor()
+        await gw.events.add("notif.posted", {"pkg": "com.pickle.client"}, "samsung SM-N960N · aaaaaa")
+        await gw.events.add("notif.posted", {"pkg": "com.pickle.client"}, "samsung SM-N960N · bbbbbb")
+        got, _ = await pb.wait_notification("com.pickle.client", cur, 1)
+        assert len(got) == 1 and got[0]["device"] == "samsung SM-N960N · bbbbbb"
+    finally:
+        await pb.aclose()
+        ta.cancel()
+        tb.cancel()
+
+
+async def test_prefer_sets_default_without_disconnecting(stack, tmp_path):
+    """기본 폰을 바꿔도 붙은 폰을 끊지 않는다. 고른 값과 목록은 재시작 뒤에도 남는다."""
+    base, gw, _ = stack
+    _, task = await _second_phone(base, gw, "samsung NOTE-9")
+    try:
+        async with _client(base) as c:
+            assert (await c.put("/prefer", json={"device": 3})).status_code == 400
+            d = (await c.put("/prefer", json={"device": "NOTE-9"})).json()
+            assert d["prefer"] == "NOTE-9" and d["current"] == "samsung NOTE-9"
+            assert next(r for r in d["devices"] if r["device"] == "samsung NOTE-9")["preferred"] is True
+        assert gw.link.device == "samsung NOTE-9" and gw.phones["fake-phone"].online
+    finally:
+        task.cancel()
+    # 우선 폰이 떠나면 남은 폰이 기본
     for _ in range(100):
-        if gw.link is not None and gw.link is not first and gw.link.device == "fake-phone":
+        if not gw.phones["samsung NOTE-9"].online:
             break
         await asyncio.sleep(0.05)
-    assert gw.link is not first and gw.link.device == "fake-phone"
-    # 우선 폰이 붙으면 자리를 넘겨받는다
-    task = asyncio.create_task(other.run_once())
-    for _ in range(100):
-        if gw.link is not None and gw.link.device == "samsung NOTE-9":
-            break
-        await asyncio.sleep(0.05)
-    assert gw.link.device == "samsung NOTE-9"
-    task.cancel()
-    # 재시작 뒤에도 남는다
+    assert gw.link.device == "fake-phone"
     again = Gateway(HUB, DEV, [], state_dir=tmp_path / "gw")
-    assert again.prefer == "samsung NOTE-9" and "fake-phone" in again.known
+    assert again.prefer == "NOTE-9" and {"fake-phone", "samsung NOTE-9"} <= set(again.known)
+
+
+async def test_each_phone_has_its_own_screen_and_notifications(stack):
+    """폰마다 화면 임대가 따로라 서로 기다리지 않는다. 어댑터는 PHONE_DEVICE 의 폰만 조종하고 그 폰 알림만 받는다."""
+    base, gw, phone = stack
+    other, task = await _second_phone(base, gw, "samsung SM-X910")
+    tab = PhoneDevice(base_url=base, token=HUB, holder="tab", phone="SM-X910")
+    note = PhoneDevice(base_url=base, token=HUB, holder="note")
+    try:
+        async with _client(base) as c:
+            a = await c.post("/lease", json={"holder": "a", "wait_s": 0})
+            b = await c.post("/lease", json={"holder": "b", "wait_s": 0, "device": "SM-X910"})
+            assert a.status_code == 200 and b.status_code == 200
+            assert a.json()["device"] == "fake-phone" and b.json()["device"] == "samsung SM-X910"
+            # 임대를 들고 온 명령은 그 임대의 폰으로 간다
+            r = await c.post("/rpc", json={"cmd": "tree", "lease": b.json()["lease"]})
+            assert r.status_code == 200
+            await c.delete(f"/lease/{a.json()['lease']}")
+            await c.delete(f"/lease/{b.json()['lease']}")
+        await tab.app_start("com.vooy.mobile")
+        assert await tab.current_package() == "com.vooy.mobile"
+        assert other.vooy.foreground and not phone.vooy.foreground
+        assert (await tab.device_profile())["device"] == "samsung SM-X910"
+        # 알림: 같은 앱이라도 다른 폰의 알림은 오지 않는다
+        cur_tab, cur_note = await tab.events_cursor(), await note.events_cursor()
+        data = {"pkg": "com.pickle.client", "channel": "chat"}
+        await gw.events.add("notif.posted", data, "samsung SM-X910")
+        got_tab, _ = await tab.wait_notification("com.pickle.client", cur_tab, 1)
+        got_note, _ = await note.wait_notification("com.pickle.client", cur_note, 0.3)
+        assert len(got_tab) == 1 and got_note == []
+    finally:
+        await tab.aclose()
+        await note.aclose()
+        task.cancel()
 
 
 async def test_screen_commands_need_lease(stack):
@@ -466,10 +529,14 @@ async def test_apk_distribution(tmp_path):
             r = await c.get("/phone/apk/download", headers=dev)
             assert r.status_code == 200 and r.content == b"APKDATA"
             assert r.headers["content-type"] == "application/vnd.android.package-archive"
-            # 일회용 링크: 허브 토큰으로만 발급, 한 번 쓰면 끝
+            # 일회용 링크: 허브 토큰으로만 발급. 첫 사용 뒤 잠깐은 다시 받을 수 있고(다운로드 관리자 재요청), 그 뒤 끝
             assert (await c.post("/apk/link")).status_code == 401
             path = (await c.post("/apk/link", headers={"X-Hub-Token": HUB})).json()["path"]
             assert (await c.get(path)).content == b"APKDATA"
+            assert (await c.get(path)).content == b"APKDATA"
+            code = path.rsplit("/", 1)[1]
+            assert gw._once[code] <= time.monotonic() + gw.ONCE_GRACE_S
+            gw._once[code] = 0.0  # 유예 시간이 지남
             assert (await c.get(path)).status_code == 404
             assert (await c.get("/phone/apk/once/guess")).status_code == 404
             # 만료

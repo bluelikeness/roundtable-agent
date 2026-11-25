@@ -36,6 +36,12 @@ ASK_INPUT_SCHEMA: dict[str, Any] = {
 STATUS_INPUT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 STATUS_DESCRIPTION = "ask 호출 전 가용성 확인. available, reason, last_ok_at, queue_depth, avg_latency_ms 를 돌려준다."
 
+# 입출력 스키마와 별개인 힌트. Claude Code 는 readOnlyHint 가 없는 MCP 툴을 한 번에 하나씩 실행해서
+# 봇 넷에 동시에 물어도 앞 봇이 끝나야 다음 봇이 시작됐다(2026-11-26 노트9: 질문 하나에 2분 30초).
+# ask 는 허브 밖 상태(봇 대화)를 바꾸지만 허브·다른 봇에는 영향이 없어 서로 겹쳐 불러도 안전하다.
+# 순서가 필요한 호출은 Claude 가 앞 결과를 받은 뒤 부르므로 이 힌트와 상관없이 차례로 간다.
+PARALLEL_SAFE = types.ToolAnnotations(read_only_hint=True)
+
 
 def _result(payload: dict[str, Any]) -> types.CallToolResult:
     return types.CallToolResult(
@@ -49,8 +55,12 @@ def build_server(adapter: "BotAdapter") -> Server:
     async def list_tools(ctx, params) -> types.ListToolsResult:
         return types.ListToolsResult(
             tools=[
-                types.Tool(name="ask", description=adapter.description, input_schema=ASK_INPUT_SCHEMA),
-                types.Tool(name="status", description=STATUS_DESCRIPTION, input_schema=STATUS_INPUT_SCHEMA),
+                types.Tool(
+                    name="ask", description=adapter.description, input_schema=ASK_INPUT_SCHEMA, annotations=PARALLEL_SAFE
+                ),
+                types.Tool(
+                    name="status", description=STATUS_DESCRIPTION, input_schema=STATUS_INPUT_SCHEMA, annotations=PARALLEL_SAFE
+                ),
             ]
         )
 

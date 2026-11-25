@@ -42,9 +42,18 @@ URL="$PUB$LINK_PATH"
 echo "설치 링크(30분, 한 번만): $URL"
 echo "QR: $DIST/qr.png"
 
-# 연결된 휴대폰이 있으면 바로 업데이트 확인
-if curl -sf -X POST -H "X-Hub-Token: $HUB_TOKEN" -H "content-type: application/json" -d '{"cmd":"update_check","timeout_s":10}' "$GW/rpc" >/dev/null; then
-  echo "연결된 휴대폰에 업데이트 확인을 보냈습니다"
+# 연결된 휴대폰마다 바로 업데이트 확인(여러 폰이 함께 붙는다)
+PHONES="$(curl -sf -H "X-Hub-Token: $HUB_TOKEN" "$GW/state" | python -c 'import sys,json;[print(p) for p in json.load(sys.stdin).get("phones") or []]' || true)"
+sent=0
+while IFS= read -r ph; do
+  [ -n "$ph" ] || continue
+  body="$(python -c 'import json,sys;print(json.dumps({"cmd":"update_check","timeout_s":10,"device":sys.argv[1]}))' "$ph")"
+  if curl -sf -X POST -H "X-Hub-Token: $HUB_TOKEN" -H "content-type: application/json" -d "$body" "$GW/rpc" >/dev/null; then
+    sent=$((sent + 1))
+  fi
+done <<< "$PHONES"
+if [ "$sent" -gt 0 ]; then
+  echo "연결된 휴대폰 ${sent}대에 업데이트 확인을 보냈습니다"
 else
   echo "연결된 휴대폰 없음(다음 연결·6시간 주기에 스스로 확인)"
 fi
