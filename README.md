@@ -204,6 +204,8 @@ Body: {"room": "room name", "text": "what to send", "from": "Pickle"}
 
 > The token is a password. Copy `HUB_INBOX_TOKEN` from `.env` yourself and rotate it if in doubt. Messages
 > from outside appear in the room as `(opinion from …)`.
+>
+> Response codes, polling and a script example: [external agent guide](docs/agent-inbox-guide.md) (Korean).
 
 ---
 
