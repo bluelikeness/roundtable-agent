@@ -220,6 +220,8 @@ flowchart TB
 | ⑤ | `hub/bots.yaml`에 `- {name: <이름>, mcp_url: http://<이름>:9000/mcp, admin_url: http://<이름>:9100, aliases: [별명]}` | 이 이름이 Claude 도구 이름이 됨 |
 | ⑥ | `docker compose up -d --build` → 웹 봇 패널에서 확인 | 방에서 "새비서한테 인사해 봐" |
 
+**다른 휴대폰의 앱**(예: 태블릿의 피클)도 같은 방에 넣을 수 있습니다. 휴대폰은 여러 대가 한 서버에 함께 붙습니다. ④에서 서비스를 복사할 때 `PHONE_DEVICE`에 그 폰 이름의 일부(예: `SM-X910`)를 적고, ⑤에 다른 이름(예: `pickle-tab`)으로 올리면 됩니다. 폰 이름은 "모델 · 기기 ID 앞 6자"라서 같은 모델도 구분됩니다. `PHONE_DEVICE`가 없으면 웹 봇 패널에서 고른 기본 폰을 씁니다. 자세한 예시는 [휴대폰 워커 설계 12장](docs/proposals/phone-worker.md).
+
 프로필 카드(`description`)가 곧 그 비서의 정체성입니다. [3장](#3-비서에게-정체성-심어-주기)을 참고해 잘하는 일과 약한 일을 분명히 쓰세요.
 
 ---
@@ -247,7 +249,7 @@ flowchart LR
    주소는 저장소에 없고 **각자 자기 도메인**을 씁니다. 인증서는 자동으로 받습니다.
 3. **실행**: `docker compose up -d` (Make가 있으면 `make up`).
 4. **계정과 Claude**: `make admin ARGS="create-operator --username me"`로 계정을 만들고 표시되는 TOTP를 인증 앱에 등록합니다. `make runner-login`으로 Claude Code에 로그인합니다(처음 한 번).
-5. **휴대폰**: `phone/release.sh`를 실행하면 30분짜리 일회용 QR이 나옵니다. 휴대폰으로 찍어 설치하고 알림 접근·접근성을 켭니다. 자세한 순서는 [phone/README.ko.md](phone/README.ko.md).
+5. **휴대폰**: `phone/release.sh`를 실행하면 30분짜리 일회용 QR이 나옵니다. 휴대폰으로 찍어 설치하고 알림 접근·접근성을 켭니다. 휴대폰을 더 붙이려면 QR을 다시 만들어 같은 방법으로 설치하면 됩니다. 자세한 순서는 [phone/README.ko.md](phone/README.ko.md).
 6. `https://<내 도메인>`에 접속해 로그인하고 방을 만들면 끝입니다.
 
 > 먼저 가짜 비서로 맛보고 싶다면 3단계까지만 하고 `docker compose --profile mock up -d`로 가짜 비서를 띄운 뒤 `hub/bots.yaml`에 `mock-a`·`mock-b`를 등록하세요. 그다음 `http://127.0.0.1:8080`에서 "mock-a랑 mock-b한테 날씨 물어봐"를 보내 보세요.

@@ -14,7 +14,7 @@ sequenceDiagram
   participant G as phone-gateway
   participant W as 워커 (휴대폰)
   participant APP as 비서 앱
-  W->>G: WSS /phone/ws + 기기 토큰, hello {device, sdk}
+  W->>G: WSS /phone/ws + 기기 토큰, hello {device, device_id, sdk}
   loop 15초마다
     W-->>G: 하트비트
   end
@@ -59,7 +59,8 @@ phone/release.sh   # .env 의 PUBLIC_HOST(각자의 도메인)로 https://<PUBLI
 
 - 빌드(버전 번호는 2026-01-01부터 초 단위) → `phone/dist/`에 게시. `phone-gateway`가 이 폴더를 읽어 워커 자동 업데이트에 쓴다.
 - 30분 동안 한 번만 쓰는 설치 링크와 QR(`phone/dist/qr.png`)을 만든다. APK 안에 기기 토큰이 있어 공개 링크는 두지 않는다.
-- 연결된 휴대폰에 `update_check`를 보낸다. 워커는 연결될 때와 6시간마다 스스로도 확인한다.
+  안드로이드 브라우저는 다운로드 관리자가 같은 주소를 한 번 더 부르므로, 처음 받은 뒤 2분 동안만 다시 받을 수 있다.
+- 연결된 휴대폰마다 `update_check`를 보낸다. 워커는 연결될 때와 6시간마다 스스로도 확인한다.
 - 워커는 새 버전을 기기 토큰으로 내려받아 SHA-256을 확인하고 PackageInstaller로 설치한다. 안드로이드 14+는
   `UPDATE_PACKAGES_WITHOUT_USER_ACTION` 권한 덕에 확인 창 없이 설치되고, 설치 뒤 접근성 서비스가 다시 켜져 저절로 다시 연결한다
   (에뮬레이터 API 34에서 확인). 서버 주소가 바뀐 배포는 이전 주소로 닿지 않으므로 QR로 다시 설치한다.
@@ -74,6 +75,7 @@ phone/release.sh   # .env 의 PUBLIC_HOST(각자의 도메인)로 https://<PUBLI
 ## 동작
 
 - 연결: 끊기면 1→30초 지수 백오프로 다시 붙는다. 하트비트 15초.
+- 여러 휴대폰: 게이트웨이 하나에 여러 대가 함께 붙는다. 이름은 "모델 · `ANDROID_ID` 앞 6자"이고 화면 차례·알림은 폰마다 따로다. 어댑터는 `PHONE_DEVICE`로 폰을 고르고, 없으면 기본 폰을 쓴다.
 - 명령: `state`(화면·잠금·전경 앱·키보드 위치), `watch`, `launch`(런처 인텐트), `tree`(앱 창의 접근성 트리를 uiautomator dump 형식 XML로), `tap`, `set_text`, `paste`(붙여넣은 뒤 클립보드 비움), `global`(home·back), `screenshot`(안드로이드 11+).
 - 알림: `watch`로 받은 앱(Vooy·피클·뮤즈)의 알림만 이벤트로 올린다. 제목·본문은 보내지 않고 길이·채널만 보낸다.
 - 화면 기록에는 명령 이름·상태만 남기고 메시지 내용은 남기지 않는다.
