@@ -6,6 +6,7 @@ AndroidAdapter 는 기기가 에뮬레이터(U2Device)인지 휴대폰(PhoneDevi
 - 알림: events_cursor()·wait_notification() 으로 답 알림을 기다린다(AndroidAdapter.reply_signal).
 
 쓰는 법: ANDROID_DEVICE_FACTORY=adapters.phone.device:PhoneDevice, PHONE_GATEWAY_URL=http://phone-gateway:9200
+여러 휴대폰: PHONE_DEVICE=<기기 이름 일부>(예: SM-X910)면 그 폰만 쓴다. 비면 게이트웨이의 기본 휴대폰.
 """
 
 from __future__ import annotations
@@ -32,10 +33,13 @@ class PhoneDevice:
     LEASE_TTL_S = 30.0
     IDLE_RELEASE_S = 2.0
 
-    def __init__(self, serial: str = "phone", *, base_url: str | None = None, token: str | None = None, holder: str | None = None):
+    def __init__(self, serial: str = "phone", *, base_url: str | None = None, token: str | None = None, holder: str | None = None,
+                 phone: str | None = None):
         self.base_url = (base_url or os.environ.get("PHONE_GATEWAY_URL", "http://phone-gateway:9200")).rstrip("/")
         self.token = token if token is not None else read_token()
         self.holder = holder or os.environ.get("ADAPTER_NAME") or serial
+        # 이 어댑터가 쓰는 휴대폰(기기 이름 일부). 비면 게이트웨이의 기본 휴대폰
+        self.phone = (phone if phone is not None else os.environ.get("PHONE_DEVICE", "")).strip()
         self.lease_wait_s = float(os.environ.get("PHONE_LEASE_WAIT_S", "60"))
         self._client: httpx.AsyncClient | None = None
         self._lease: str | None = None
@@ -51,6 +55,10 @@ class PhoneDevice:
             self._client = httpx.AsyncClient(base_url=self.base_url, headers={"X-Hub-Token": self.token}, timeout=90)
         return self._client
 
+    def _which(self) -> dict[str, str]:
+        """게이트웨이에 어느 휴대폰인지 알린다. 정하지 않았으면 빈 값(기본 휴대폰)."""
+        return {"device": self.phone} if self.phone else {}
+
     async def _req(self, method: str, path: str, **kw: Any) -> httpx.Response:
         try:
             return await self._http().request(method, path, **kw)
@@ -59,7 +67,10 @@ class PhoneDevice:
 
     async def _rpc(self, cmd: str, args: dict[str, Any] | None = None, timeout_s: float = 15, lease: str | None = None) -> dict:
         r = await self._req(
-            "POST", "/rpc", json={"cmd": cmd, "args": args or {}, "timeout_s": timeout_s, "lease": lease, "ttl_s": self.LEASE_TTL_S}
+            "POST", "/rpc", json={
+                "cmd": cmd, "args": args or {}, "timeout_s": timeout_s, "lease": lease, "ttl_s": self.LEASE_TTL_S,
+                **self._which(),
+            }
         )
         if r.status_code == 200:
             return r.json().get("result") or {}
@@ -79,7 +90,10 @@ class PhoneDevice:
             r = await self._req(
                 "POST",
                 "/lease",
-                json={"holder": self.holder, "wait_s": self.lease_wait_s, "ttl_s": self.LEASE_TTL_S, "priority": priority},
+                json={
+                    "holder": self.holder, "wait_s": self.lease_wait_s, "ttl_s": self.LEASE_TTL_S, "priority": priority,
+                    **self._which(),
+                },
             )
             if r.status_code != 200:
                 raise BackendDown(f"휴대폰 화면을 받지 못함: {_error(r)}")
@@ -260,7 +274,7 @@ class PhoneDevice:
         sdk 를 모르면(옛 워커) None. 실패해도 예외 대신 빈 값을 돌려준다(전송을 막지 않는다).
         """
         try:
-            r = await self._req("GET", "/state")
+            r = await self._req("GET", "/state", params=self._which())
             st = r.json() if r.status_code == 200 else {}
         except Exception as e:  # noqa: BLE001
             log.info("휴대폰 정보 확인 실패: %s", e)
@@ -268,14 +282,14 @@ class PhoneDevice:
         return {"device": st.get("device"), "sdk": st.get("sdk"), "android": st.get("android")}
 
     async def events_cursor(self) -> int:
-        r = await self._req("GET", "/state")
+        r = await self._req("GET", "/state", params=self._which())
         if r.status_code != 200:
             raise BackendDown(f"폰 게이트웨이 상태: {_error(r)}")
         return int(r.json().get("event_seq") or 0)
 
     async def wait_events(self, pkg: str, after: int, wait_s: float) -> tuple[list[dict[str, Any]], int]:
         """after 이후 pkg 의 알림 이벤트(notif.posted·notif.removed, 요약 알림 제외)와 새 커서."""
-        r = await self._req("GET", "/events", params={"after": after, "pkg": pkg, "wait_s": max(0.0, wait_s)})
+        r = await self._req("GET", "/events", params={"after": after, "pkg": pkg, "wait_s": max(0.0, wait_s), **self._which()})
         if r.status_code != 200:
             raise BackendDown(f"폰 게이트웨이 이벤트: {_error(r)}")
         evs = r.json().get("events") or []

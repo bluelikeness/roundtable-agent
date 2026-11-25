@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 
 import org.json.JSONObject;
 
@@ -161,6 +162,9 @@ final class Worker {
                 JSONObject hello = new JSONObject();
                 hello.put("type", "hello");
                 hello.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                // 같은 모델 두 대를 가르는 기기 고유 값(앱 서명·기기·사용자마다 다르고, 재설치해도 같다)
+                String devId = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
+                if (devId != null && !devId.isEmpty()) hello.put("device_id", devId);
                 hello.put("version", Updater.currentName(ctx) + "(" + Updater.currentVersion(ctx) + ")");
                 hello.put("sdk", Build.VERSION.SDK_INT);
                 hello.put("android", Build.VERSION.RELEASE);

@@ -34,6 +34,7 @@ LAUNCHER = "com.google.android.apps.nexuslauncher"
 
 class FakePhone:
     device_name = "fake-phone"  # hello 의 기기 이름(다른 휴대폰 흉내는 인스턴스에서 바꾼다)
+    device_id: str | None = None  # hello 의 기기 ID(ANDROID_ID). None 이면 옛 워커처럼 보내지 않는다
     sdk = 34  # 안드로이드 API 레벨(29 = 안드로이드 10: 스크린샷 없음)
     secure = True  # 보안 잠금(PIN 등). 거짓이면 wake 가 화면을 켜고 잠금화면을 넘긴다
 
@@ -216,7 +217,10 @@ class FakePhone:
     async def run_once(self) -> None:
         async with connect(self.url, additional_headers={"Authorization": f"Bearer {self.token}"}) as ws:
             self._ws = ws
-            await ws.send(json.dumps({"type": "hello", "device": self.device_name, "version": "fake", "sdk": self.sdk, "android": str(self.sdk - 20)}))
+            hello = {"type": "hello", "device": self.device_name, "version": "fake", "sdk": self.sdk, "android": str(self.sdk - 20)}
+            if self.device_id:
+                hello["device_id"] = self.device_id
+            await ws.send(json.dumps(hello))
             self.connected.set()
             pinger = asyncio.get_running_loop().create_task(self._ping())
             try:
