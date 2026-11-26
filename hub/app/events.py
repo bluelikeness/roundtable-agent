@@ -93,6 +93,8 @@ class SubscribePayload(_Model):
 class SendPayload(_Model):
     text: str
     model: Literal["sonnet", "opus"] | None = None
+    # 허브 파일 ID(POST /api/files 로 먼저 올린 것). 봉투·type 은 그대로, payload 필드만 더한다
+    attachments: list[str] = Field(default_factory=list)  # 개수 상한(5)은 RunManager.send 가 본다
 
 
 class CancelQueuedPayload(_Model):

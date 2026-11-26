@@ -858,6 +858,12 @@
             }
           ],
           "default": null
+        },
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

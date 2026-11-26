@@ -753,6 +753,87 @@ button {
   object-fit: cover;
   display: block;
 }
+/* 첨부·봇 파일 (features/files/FileList) */
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.files .thumb {
+  width: 96px;
+}
+.file-media {
+  margin: 0;
+  max-width: min(100%, 360px);
+}
+.file-media video,
+.file-media audio {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+}
+.file-media audio {
+  background: none;
+}
+.file-media figcaption,
+.file-chip {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.file-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  text-decoration: none;
+}
+.bubble.user .files a {
+  color: inherit;
+}
+/* 입력창 위 붙인 파일 */
+.attach-list {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attach-list li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.attach-list li .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.attach-list li.uploading {
+  opacity: 0.7;
+}
+.attach-list li.error {
+  border-color: var(--danger, #c0392b);
+}
+.btn.attach {
+  padding: 0 10px;
+  min-height: 46px;
+  font-size: 18px;
+}
 .lightbox {
   position: fixed;
   inset: 0;

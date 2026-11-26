@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -251,4 +252,22 @@ class RoomMessage(Base):
     who: Mapped[str] = mapped_column(String(40), nullable=False)
     kind: Mapped[ParticipantKind] = mapped_column(Enum(ParticipantKind, name="participant_kind"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _ts()
+
+
+class HubFile(Base):
+    """허브 파일 보관함(docs/03-adapters.md 2장 첨부). 본문은 디스크(files_dir/<id>), 여기에는 메타만.
+
+    source: "upload"(운영자) 또는 "bot:<이름>"(봇이 만든 파일). 보관 기간이 지나면 지운다."""
+
+    __tablename__ = "hub_file"
+    # 보관 기간 정리가 오래된 것부터 찾는다
+    __table_args__ = (Index("ix_hub_file_created_at", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
     created_at: Mapped[datetime] = _ts()

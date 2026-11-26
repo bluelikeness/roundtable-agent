@@ -6,7 +6,9 @@
  */
 import { useState } from "react";
 import { imageSrc } from "../../api/rest";
+import { FileList } from "../files/FileList";
 import type {
+  FileRef,
   Structured,
   StructuredButton,
   StructuredCard,
@@ -67,13 +69,28 @@ export function parseStructured(raw: Record<string, unknown> | null | undefined)
     .filter((i): i is Record<string, unknown> => !!i && str(i.url))
     .map((i) => ({ url: i.url as string, alt: optStr(i.alt) }));
   if (images.length) out.images = images;
+  const files = parseFiles(raw.files);
+  if (files.length) out.files = files;
   const conf = obj(raw.confirmation_required);
   if (conf && str(conf.summary)) out.confirmation_required = { summary: conf.summary, action_id: optStr(conf.action_id) };
   return out;
 }
 
+/** 첨부·봇 파일 목록을 거른다(사용자 메시지 structured.attachments 에도 쓴다) */
+export function parseFiles(v: unknown): FileRef[] {
+  return arr(v)
+    .map(obj)
+    .filter((f): f is Record<string, unknown> => !!f && str(f.id) && /^f_[A-Za-z0-9_-]{16,64}$/.test(f.id as string))
+    .map((f) => ({
+      id: f.id as string,
+      name: optStr(f.name) ?? "file",
+      mime: optStr(f.mime) ?? "application/octet-stream",
+      size: typeof f.size === "number" ? f.size : 0,
+    }));
+}
+
 export function hasInside(s: Structured): boolean {
-  return !!(s.buttons || s.choices || s.links || s.cards || s.images);
+  return !!(s.buttons || s.choices || s.links || s.cards || s.images || s.files);
 }
 
 interface ChipProps {
@@ -210,6 +227,7 @@ export function StructuredInside({ s, ...chip }: ChipProps & { s: Structured }) 
       {s.links && <Links items={s.links} />}
       {s.cards && <Cards items={s.cards} bot={chip.bot} />}
       {s.images && <Images items={s.images} bot={chip.bot} />}
+      {s.files && <FileList files={s.files} />}
     </>
   );
 }

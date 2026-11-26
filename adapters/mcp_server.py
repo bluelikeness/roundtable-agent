@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("adapters.mcp")
 
-# 03 2장 inputSchema 그대로. 바꾸지 않는다.
+# 03 2장 inputSchema 그대로. 바꾸지 않는다(attachments 는 2026-11-26 승인을 받아 더한 필드).
 ASK_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["text", "thread_id"],
@@ -30,6 +30,12 @@ ASK_INPUT_SCHEMA: dict[str, Any] = {
         "thread_id": {"type": "string", "description": "허브 세션 ID. 같은 ID면 같은 봇 대화를 잇는다"},
         "timeout_s": {"type": "integer", "default": 120, "minimum": 10, "maximum": 240},
         "reset": {"type": "boolean", "default": False, "description": "true면 봇 대화를 새로 시작한 뒤 보낸다"},
+        "attachments": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"type": "string", "pattern": "^f_[A-Za-z0-9_-]{16,64}$"},
+            "description": "허브 파일 ID. 사용자 글의 [첨부 파일] 목록이나 다른 봇 답의 structured.files[].id 를 그대로 넣는다",
+        },
     },
 }
 
@@ -51,12 +57,21 @@ def _result(payload: dict[str, Any]) -> types.CallToolResult:
     )
 
 
+def ask_description(adapter: "BotAdapter") -> str:
+    """봇 설명 끝에 첨부를 받는지 한 줄 붙인다. Claude 가 보내기 전에 고를 수 있게."""
+    if adapter.accepts_files:
+        kinds = ", ".join(k + "*" if k.endswith("/") else k for k in adapter.accepts_files)
+        return f"{adapter.description}\n\n첨부(attachments): {kinds} 를 받는다. 만든 파일은 structured.files 로 돌려준다."
+    return f"{adapter.description}\n\n첨부(attachments)는 받지 않는다(넣으면 error=unsupported)."
+
+
 def build_server(adapter: "BotAdapter") -> Server:
     async def list_tools(ctx, params) -> types.ListToolsResult:
         return types.ListToolsResult(
             tools=[
                 types.Tool(
-                    name="ask", description=adapter.description, input_schema=ASK_INPUT_SCHEMA, annotations=PARALLEL_SAFE
+                    name="ask", description=ask_description(adapter), input_schema=ASK_INPUT_SCHEMA,
+                    annotations=PARALLEL_SAFE,
                 ),
                 types.Tool(
                     name="status", description=STATUS_DESCRIPTION, input_schema=STATUS_INPUT_SCHEMA, annotations=PARALLEL_SAFE
@@ -73,6 +88,7 @@ def build_server(adapter: "BotAdapter") -> Server:
                     args.get("thread_id"),
                     timeout_s=args.get("timeout_s"),
                     reset=args.get("reset", False),
+                    attachments=args.get("attachments"),
                 )
                 return _result(res.model_dump())
             if params.name == "status":

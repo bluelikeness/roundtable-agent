@@ -16,6 +16,7 @@ import { linkify } from "../../../lib/linkify";
 import { useMobile } from "../../../lib/media";
 import { absolute, elapsedSince, seconds } from "../../../lib/time";
 import { ConfirmBox, hasInside, parseStructured, StructuredInside } from "../../structured";
+import { FileList } from "../../files/FileList";
 
 // 봇 원문 접기: 데스크톱 20줄, 모바일 10줄 (docs/05-ui.md 2·7장)
 const RAW_FOLD_LINES = 20;
@@ -27,6 +28,7 @@ export function User({ item }: { item: UserItem }) {
     <div className="row right">
       <div className={`bubble user${item.optimistic ? " optimistic" : ""}`} title={absolute(item.ts)}>
         {item.text}
+        {item.attachments && <FileList files={item.attachments} />}
       </div>
     </div>
   );

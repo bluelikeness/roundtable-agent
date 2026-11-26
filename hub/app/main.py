@@ -1,5 +1,7 @@
 """허브 API 진입점."""
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,6 +12,9 @@ from app.bots_api import internal as internal_router
 from app.bots_api import router as bots_router
 from app.config import get_settings
 from app.db import dispose_engine, get_sessionmaker
+from app.files import internal as files_internal_router
+from app.files import purge_loop
+from app.files import router as files_router
 from app.inbox import router as inbox_router
 from app.rooms import join_router
 from app.rooms import op_router as rooms_router
@@ -32,9 +37,14 @@ async def lifespan(app: FastAPI):
     monitor = BotMonitor(get_sessionmaker(), settings, manager.broadcast_global)
     await monitor.start()
     app.state.bot_monitor = monitor
+    # 보관 기간 지난 첨부·봇 파일 정리(하루에 한 번)
+    purger = asyncio.create_task(purge_loop(get_sessionmaker(), settings), name="files:purge")
     try:
         yield
     finally:
+        purger.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await purger
         await monitor.aclose()
         await manager.shutdown()
         if isinstance(runner, RemoteRunner):
@@ -51,6 +61,8 @@ app.include_router(inbox_router)
 app.include_router(rooms_router)
 app.include_router(participant_router)
 app.include_router(join_router)
+app.include_router(files_router)
+app.include_router(files_internal_router)
 
 
 @app.get("/healthz")

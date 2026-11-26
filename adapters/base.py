@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
+from urllib.parse import quote, unquote
 
 import httpx
 import yaml
@@ -33,10 +34,24 @@ VERSION = "0.1.0"
 TEXT_MAX = 4000
 TIMEOUT_MIN, TIMEOUT_MAX, TIMEOUT_DEFAULT = 10, 240, 120
 
-ErrorCode = Literal["timeout", "unavailable", "login_required", "rate_limited", "internal"]
+# unsupported: 이 봇이 받지 못하는 첨부(attachments)를 받았다(03 2장)
+ErrorCode = Literal["timeout", "unavailable", "login_required", "rate_limited", "internal", "unsupported"]
 StatusReason = Literal["login_required", "disabled", "backend_down", "cooldown"]
 
 TAP_RE = re.compile(r"^\[tap:([^\]\s]+)\]\s*", re.DOTALL)
+
+# 첨부: 허브 파일 ID(허브 app/files.py 와 같은 모양), ask 한 번에 붙이는 최대 개수
+FILE_ID_RE = re.compile(r"^f_[A-Za-z0-9_-]{16,64}$")
+ATTACHMENTS_MAX = 5
+
+
+def _disposition_name(cd: str) -> str | None:
+    """Content-Disposition 의 filename*(UTF-8) 또는 filename."""
+    m = re.search(r"filename\*=utf-8''([^;]+)", cd, re.I)
+    if m:
+        return unquote(m.group(1))
+    m = re.search(r'filename="?([^";]+)"?', cd)
+    return m.group(1) if m else None
 
 
 def utcnow_iso() -> str:
@@ -72,6 +87,15 @@ class Image(BaseModel):
     alt: str | None = None
 
 
+class FileRef(BaseModel):
+    """허브 파일 보관함의 파일 하나(structured.files[]). id 를 다음 봇의 ask attachments 로 넘긴다."""
+
+    id: str
+    name: str
+    mime: str
+    size: int
+
+
 class Confirmation(BaseModel):
     summary: str
     action_id: str
@@ -84,6 +108,8 @@ class Structured(BaseModel):
     links: list[Link] | None = None
     cards: list[Card] | None = None
     images: list[Image] | None = None
+    # 봇이 만든 파일(영상·문서 등). 허브에 올린 뒤의 ID
+    files: list[FileRef] | None = None
     choices: list[str] | None = None
     confirmation_required: Confirmation | None = None
 
@@ -113,6 +139,17 @@ class Status(BaseModel):
 # ---------------------------------------------------------------------------
 # 어댑터 내부 모델
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class Attachment:
+    """ask 의 attachments 하나를 허브에서 받아 둔 것. _attach 훅에 넘긴다."""
+
+    id: str
+    name: str
+    mime: str
+    size: int
+    path: Path
 
 
 @dataclass
@@ -186,6 +223,12 @@ class BotTimeout(AdapterError):
     code = "timeout"
 
 
+class Unsupported(AdapterError):
+    """이 봇은 그 첨부(종류)를 받지 못한다."""
+
+    code = "unsupported"
+
+
 class SendLost(AdapterError):
     """보낸 질문이 대화에 없다(전송이 안 됨). _collect 가 던지면 베이스가 한 번 다시 보낸다."""
 
@@ -225,6 +268,8 @@ class AdapterConfig(BaseModel):
     min_interval_s: float | None = None
     health: HealthConfig = Field(default_factory=HealthConfig)
     hub_webhook: str | None = None
+    # 허브 파일 보관함(내부망). 비면 hub_webhook 의 주소로 <origin>/internal/files 를 쓴다
+    hub_files: str | None = None
 
     @classmethod
     def load(cls, path: str | Path) -> "AdapterConfig":
@@ -234,6 +279,8 @@ class AdapterConfig(BaseModel):
             data["name"] = os.environ["ADAPTER_NAME"]
         if os.environ.get("HUB_WEBHOOK_URL"):
             data["hub_webhook"] = os.environ["HUB_WEBHOOK_URL"]
+        if os.environ.get("HUB_FILES_URL"):
+            data["hub_files"] = os.environ["HUB_FILES_URL"]
         return cls.model_validate(data)
 
 
@@ -262,6 +309,9 @@ class BotAdapter(ABC):
     poll_s: float = 0.25  # _collect 호출 간격
     # 답이 없으면 남은 시간의 절반에 같은 질문을 무조건 다시 보낸다. 끄면 _collect 가 SendLost 를 던질 때만 보낸다
     blind_resend: bool = True
+    # 받는 첨부 MIME(앞부분 일치, 예: "image/"). 비어 있으면 첨부를 받지 않는다(error=unsupported).
+    # 채우는 봇은 _attach 훅을 구현한다
+    accepts_files: tuple[str, ...] = ()
 
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = ""):
         self.config = config
@@ -344,13 +394,23 @@ class BotAdapter(ABC):
     async def _on_start(self) -> None:
         """서버 기동 직전 1회."""
 
+    async def _attach(self, thread: Thread, files: list[Attachment]) -> None:
+        """첨부를 봇 대화에 넣는다. 바로 뒤 _send 가 글을 보낸다(글과 함께 보내는 앱은 여기서 기억해 둔다).
+
+        accepts_files 를 채운 봇만 불린다. 재시도 때는 다시 부르지 않고 글만 다시 보낸다."""
+        raise Unsupported("이 봇은 첨부를 받지 않습니다")
+
     # --- ask ---------------------------------------------------------------
 
-    async def ask(self, text: Any, thread_id: Any, timeout_s: Any = None, reset: Any = False) -> AskResult:
+    async def ask(
+        self, text: Any, thread_id: Any, timeout_s: Any = None, reset: Any = False, attachments: Any = None
+    ) -> AskResult:
         t0 = time.monotonic()
         record: dict[str, Any] = {"at": utcnow_iso(), "thread_id": thread_id, "text": str(text)[:200]}
+        if attachments:
+            record["attachments"] = attachments if isinstance(attachments, list) else str(attachments)[:200]
         try:
-            res = await self._ask(text, thread_id, timeout_s, reset, t0, record)
+            res = await self._ask(text, thread_id, timeout_s, reset, t0, record, attachments)
         except Exception as e:  # 마지막 방어선: 어떤 예외도 MCP 로 새지 않는다
             log.exception("ask 내부 오류")
             record["detail"] = f"{type(e).__name__}: {e}"
@@ -366,7 +426,7 @@ class BotAdapter(ABC):
     def _elapsed_ms(t0: float) -> int:
         return max(1, int((time.monotonic() - t0) * 1000))
 
-    async def _ask(self, text, thread_id, timeout_s, reset, t0: float, record: dict) -> AskResult:
+    async def _ask(self, text, thread_id, timeout_s, reset, t0: float, record: dict, attachments=None) -> AskResult:
         # 입력 검증: 스키마 위반도 예외가 아니라 error=internal
         if timeout_s is None:
             timeout_s = self.default_timeout_s
@@ -381,6 +441,12 @@ class BotAdapter(ABC):
             problem = f"timeout_s 는 {TIMEOUT_MIN}~{TIMEOUT_MAX} 정수여야 합니다"
         elif not isinstance(reset, bool):
             problem = "reset 은 bool 이어야 합니다"
+        elif attachments is not None and (
+            not isinstance(attachments, list)
+            or len(attachments) > ATTACHMENTS_MAX
+            or not all(isinstance(a, str) and FILE_ID_RE.match(a) for a in attachments)
+        ):
+            problem = f"attachments 는 허브 파일 ID(f_…) {ATTACHMENTS_MAX}개 이하의 배열이어야 합니다"
         if problem:
             record["detail"] = problem
             return self._fail("internal", t0)
@@ -388,6 +454,10 @@ class BotAdapter(ABC):
         if not self.enabled:
             record["detail"] = "disabled"
             return self._fail("unavailable", t0)
+        attachments = list(dict.fromkeys(attachments or []))
+        if attachments and not self.accepts_files:
+            record["detail"] = "이 봇은 첨부를 받지 않음"
+            return self._fail("unsupported", t0)
 
         deadline = t0 + timeout_s
         if self._waiting >= self.config.queue.max_depth:
@@ -415,7 +485,7 @@ class BotAdapter(ABC):
         try:
             # 훅(_extract·_is_typing·_on_reset 등)이 멈춰도 timeout_s 를 넘기지 않고 큐 락을 놓는다
             async with asyncio.timeout(max(0.0, deadline - time.monotonic())):
-                return await self._run(text, thread_id, reset, t0, deadline, record)
+                return await self._run(text, thread_id, reset, t0, deadline, record, attachments)
         except TimeoutError:
             record.setdefault("detail", "ask 전체 시간 초과")
             return self._fail("timeout", t0)
@@ -423,7 +493,10 @@ class BotAdapter(ABC):
             if acquired:
                 self._lock.release()
 
-    async def _run(self, text: str, thread_id: str, reset: bool, t0: float, deadline: float, record: dict) -> AskResult:
+    async def _run(
+        self, text: str, thread_id: str, reset: bool, t0: float, deadline: float, record: dict,
+        attachments: list[str] | None = None,
+    ) -> AskResult:
         # 연속 전송 최소 간격
         gap = self._last_send_mono + self.min_interval_s - time.monotonic()
         if gap > 0:
@@ -450,6 +523,9 @@ class BotAdapter(ABC):
             try:
                 async with asyncio.timeout(max(0.0, send_limit)):
                     await self._ensure_ready()
+                    if attachments:
+                        files = await self._fetch_attachments(attachments)
+                        await self._attach(thread, files)
                     await self._send(thread, body, tap)
             except TimeoutError:
                 raise BotTimeout("sending 단계 시간 초과") from None
@@ -666,6 +742,70 @@ class BotAdapter(ABC):
         if not since:
             return list(self.logs)
         return [r for r in self.logs if r["at"] > since]
+
+    # --- 허브 파일 보관함 (첨부 받기·봇이 만든 파일 올리기) ------------------
+
+    def _files_url(self) -> str | None:
+        if self.config.hub_files:
+            return self.config.hub_files.rstrip("/")
+        hook = self.config.hub_webhook
+        if not hook:
+            return None
+        m = re.match(r"^(https?://[^/]+)", hook)
+        return f"{m.group(1)}/internal/files" if m else None
+
+    async def _fetch_attachments(self, ids: list[str]) -> list[Attachment]:
+        """허브에서 첨부를 받아 state_dir/incoming 에 둔다. 받지 못하는 종류면 Unsupported."""
+        base = self._files_url()
+        if not base:
+            raise AdapterError("허브 파일 주소가 없습니다(hub_files·hub_webhook)")
+        d = self.state_dir / "incoming"
+        d.mkdir(exist_ok=True)
+        out: list[Attachment] = []
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=60)) as c:
+            for fid in ids:
+                path = d / fid
+                async with c.stream("GET", f"{base}/{fid}", headers={"X-Hub-Token": self.token}) as r:
+                    if r.status_code == 404:
+                        raise AdapterError(f"첨부 {fid} 없음(보관 기간이 지났을 수 있음)")
+                    if r.status_code != 200:
+                        raise AdapterError(f"첨부 {fid} 받기 실패 HTTP {r.status_code}")
+                    mime = r.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+                    if not any(mime.startswith(p) for p in self.accepts_files):
+                        raise Unsupported(f"받지 않는 첨부 종류 {mime}")
+                    name = _disposition_name(r.headers.get("content-disposition", "")) or fid
+                    size = 0
+                    with path.open("wb") as f:
+                        async for chunk in r.aiter_bytes():
+                            size += len(chunk)
+                            f.write(chunk)
+                out.append(Attachment(id=fid, name=name, mime=mime, size=size, path=path))
+        return out
+
+    async def publish_file(self, data: bytes | Path, name: str, mime: str) -> FileRef:
+        """봇이 만든 파일을 허브 보관함에 올리고 structured.files 에 넣을 FileRef 를 돌려준다.
+
+        실패하면 AdapterError(이 ask 는 error=internal). 큰 파일은 Path 로 넘기면 흘려 올린다."""
+        base = self._files_url()
+        if not base:
+            raise AdapterError("허브 파일 주소가 없습니다(hub_files·hub_webhook)")
+        headers = {
+            "X-Hub-Token": self.token, "X-Bot": self.name, "X-File-Name": quote(name), "Content-Type": mime,
+        }
+
+        async def body():
+            if isinstance(data, Path):
+                with data.open("rb") as f:
+                    while chunk := f.read(1 << 20):
+                        yield chunk
+            else:
+                yield data
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, write=120, read=60)) as c:
+            r = await c.post(base, content=body(), headers=headers)
+        if r.status_code != 201:
+            raise AdapterError(f"파일 올리기 실패 HTTP {r.status_code}")
+        return FileRef.model_validate(r.json())
 
     # --- 이미지 스토리지 (structured.images[].url 의 로컬 파일) -------------
 

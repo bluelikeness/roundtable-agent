@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.bots import available_endpoints, load_bots
 from app.config import Settings
 from app.events import HubEvent, MessageAck, MessageAckPayload, RunFinished, RunFinishedPayload
+from app.files import MAX_ATTACHMENTS, describe_for_claude, file_out, load_many
 from app.models import ChatSession, Message, MessageRole, Run, RunStatus, ToolCall
 from app.runner_protocol import Runner, RunnerSession, ToolCallRecord
 
@@ -196,9 +197,14 @@ class RunManager:
 
     # --- 클라이언트 명령 ---
 
-    async def send(self, sid: uuid.UUID, text: str, model: str | None) -> HubEvent:
-        if not text.strip():
+    async def send(
+        self, sid: uuid.UUID, text: str, model: str | None, attachments: list[str] | None = None
+    ) -> HubEvent:
+        attachments = list(dict.fromkeys(attachments or []))  # 같은 파일을 두 번 붙여도 한 번
+        if not text.strip() and not attachments:
             raise SendError("empty_text")
+        if len(attachments) > MAX_ATTACHMENTS:
+            raise SendError("too_many_attachments")
         st = self._state(sid)
         async with self._sm() as db:
             s = await db.get(ChatSession, sid)
@@ -207,7 +213,14 @@ class RunManager:
             if s.trashed_at is not None:
                 # 휴지통의 세션은 읽기 전용. 되살린 뒤에 보낸다
                 raise SendError("session_trashed")
-            msg = Message(id=uuid.uuid4(), session_id=sid, role=MessageRole.user, raw=text)
+            structured = None
+            if attachments:
+                try:
+                    files = await load_many(db, attachments)
+                except ValueError:
+                    raise SendError("file_not_found") from None
+                structured = {"attachments": [file_out(f) for f in files]}
+            msg = Message(id=uuid.uuid4(), session_id=sid, role=MessageRole.user, raw=text, structured=structured)
             run = Run(id=uuid.uuid4(), session_id=sid, user_message_id=msg.id, status=RunStatus.queued)
             s.last_message_at = _now()
             busy = st.current is not None or bool(st.queue)
@@ -273,6 +286,11 @@ class RunManager:
             await db.commit()
             rs = await self._runner_session(db, s, run, user_msg, q)
             text = user_msg.raw
+            attached = (user_msg.structured or {}).get("attachments") or []
+            if attached:
+                # Runner.start 는 글만 받는다. 첨부는 ID 목록을 글 끝에 붙여 Claude 에게 알린다
+                sep = "\n\n" if text.strip() else ""
+                text = text.rstrip() + sep + describe_for_claude(attached)
 
         finished = False
         # 중간에 빠져나와도 러너 스트림(HTTP 연결 → claude 프로세스)이 바로 닫히게 aclosing

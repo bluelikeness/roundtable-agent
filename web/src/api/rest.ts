@@ -1,5 +1,5 @@
 // 허브 REST fetch 래퍼. 인증은 HttpOnly 쿠키라 credentials 만 맞추면 된다.
-import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, LoginStart, PhoneOut, LoginSubmitResult, MessageOut, SessionOut, GroupOut, ModelName } from "./types";
+import type { BotInfo, BotLogEntry, BotStatusPayload, ClaudeStatus, FileRef, LoginStart, PhoneOut, LoginSubmitResult, MessageOut, SessionOut, GroupOut, ModelName } from "./types";
 
 export class HttpError extends Error {
   constructor(
@@ -85,6 +85,33 @@ export const api = {
 const enc = encodeURIComponent;
 
 /** 봇 이미지 URL. 어댑터 로컬 경로(/images/<id>)는 허브 프록시로 바꾼다(docs/05-ui.md 3장) */
+/** 허브 파일 보관함에 올린다(본문 그대로, 이름은 X-File-Name). 상한을 넘으면 HttpError(413) */
+export async function uploadFile(file: File): Promise<FileRef> {
+  const res = await fetch("/api/files", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+    body: file,
+  });
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized?.();
+    let code = res.statusText;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") code = data.detail;
+    } catch {
+      // 본문 없음
+    }
+    throw new HttpError(res.status, code);
+  }
+  return (await res.json()) as FileRef;
+}
+
+/** 허브 파일 보기 주소. 모양이 틀린 ID 는 null */
+export function fileSrc(id: string): string | null {
+  return /^f_[A-Za-z0-9_-]{16,64}$/.test(id) ? `/api/files/${id}` : null;
+}
+
 export function imageSrc(bot: string, url: string): string | null {
   const m = /^\/images\/([0-9A-Za-z_-]+)$/.exec(url);
   if (m) return `/api/bots/${enc(bot)}/images/${m[1]}`;

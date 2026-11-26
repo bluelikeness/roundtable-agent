@@ -9,6 +9,10 @@ text 에 지시어를 넣는다(봇이 자기 메시지를 읽고 행동을 바�
   [mock:confirm]  결제 확인 단계(confirmation_required)로 답한다
   [mock:image]    이미지 첨부 하나를 붙여 답한다
   [mock:fast]     지연을 0.2초로 줄인다
+  [mock:file]     만든 파일 하나를 허브에 올려 structured.files 로 답한다
+                  (첨부를 받았으면 첫 첨부를 "mock-<이름>" 으로, 아니면 mock.txt)
+
+첨부(attachments)는 이미지·영상·소리·글·PDF 를 받는다. 받은 첨부는 답 첫 줄에 "받은 첨부: 이름 (종류, 크기)" 로 적는다.
 
 로그인 상태는 state_dir/session.json 파일이 있느냐로 흉내 낸다. 지우면 login_required.
 
@@ -31,11 +35,13 @@ from pydantic import BaseModel, Field
 
 from adapters.base import (
     AdapterConfig,
+    Attachment,
     BotAdapter,
     BotTimeout,
     Button,
     CodeLogin,
     Confirmation,
+    FileRef,
     Image,
     Link,
     LoginFlow,
@@ -86,6 +92,8 @@ class MockConfig(BaseModel):
 
 
 class MockAdapter(BotAdapter):
+    accepts_files = ("image/", "video/", "audio/", "text/", "application/pdf")
+
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = "", seed: int | None = None):
         super().__init__(config, state_dir, token)
         self.mock = MockConfig.model_validate((config.model_extra or {}).get("mock") or {})
@@ -95,6 +103,7 @@ class MockAdapter(BotAdapter):
         # thread_id → 마지막 전송 이후 도착한 메시지 / 실패 여부 / 응답 예약 태스크
         self._inbox: dict[str, list[RawMessage]] = {}
         self._failed: dict[str, bool] = {}
+        self._attached: dict[str, list[Attachment]] = {}
         self._pending: dict[str, asyncio.Task] = {}
 
     # --- 로그인 흉내 --------------------------------------------------------
@@ -129,6 +138,9 @@ class MockAdapter(BotAdapter):
         return CodeLogin(hint="Mock 로그인: 아무 코드나 넣으면 성공합니다", submit=submit, complete=complete)
 
     # --- 송수신 -------------------------------------------------------------
+
+    async def _attach(self, thread: Thread, files: list[Attachment]) -> None:
+        self._attached[thread.thread_id] = files
 
     async def _send(self, thread: Thread, text: str, tap: str | None) -> None:
         self._sent += 1
@@ -182,6 +194,17 @@ class MockAdapter(BotAdapter):
             reply = next((tpl for kw, tpl in self.mock.replies.items() if kw in body), None) or f"echo: {body}"
         if "image" in directives:
             meta["images"] = [{"url": self.store_image(PIXEL_PNG, "image/png"), "alt": "mock 이미지"}]
+        attached = self._attached.pop(tid, [])
+        if attached:
+            got = ", ".join(f"{a.name} ({a.mime}, {a.size} bytes)" for a in attached)
+            reply = f"받은 첨부: {got}\n{reply}"
+        if "file" in directives:
+            if attached:
+                first = attached[0]
+                ref = await self.publish_file(first.path, f"mock-{first.name}", first.mime)
+            else:
+                ref = await self.publish_file("mock 이 만든 파일\n".encode(), "mock.txt", "text/plain")
+            meta["files"] = [ref.model_dump()]
 
         # 버튼 action_id 는 스레드별로 기억해 두어야 [tap:] 때 라벨을 찾는다
         buttons = [{"label": lb, "action_id": f"btn_{i + 1}"} for i, lb in enumerate(BUTTON_RE.findall(reply))]
@@ -217,6 +240,9 @@ class MockAdapter(BotAdapter):
         images = [Image(**i) for m in msgs for i in m.meta.get("images", [])]
         if images:
             s.images = images
+        files = [FileRef(**f) for m in msgs for f in m.meta.get("files", [])]
+        if files:
+            s.files = files
         for m in msgs:
             if m.meta.get("choices"):
                 s.choices = list(m.meta["choices"])

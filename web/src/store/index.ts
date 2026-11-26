@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { api, HttpError } from "../api/rest";
-import type { BotInfo, BotStatusPayload, ClaudeStatus, GroupOut, HubEvent, SessionOut } from "../api/types";
+import type { BotInfo, BotStatusPayload, ClaudeStatus, FileRef, GroupOut, HubEvent, SessionOut } from "../api/types";
 import { HubSocket, type WsStatus } from "../api/ws";
 import { ackNeedsFetch, addOptimisticUser, applyEvent, emptyChat, loadMessages, type ChatState } from "./chat";
 
@@ -527,8 +527,8 @@ export function modelOf(sid: string | null): Model | null {
 }
 
 /** 사용자 메시지 전송. 성공하면 true(입력창을 비운다) */
-export async function sendText(text: string): Promise<boolean> {
-  if (!text.trim()) return false;
+export async function sendText(text: string, files: FileRef[] = []): Promise<boolean> {
+  if (!text.trim() && !files.length) return false;
   if (!socket?.isOpen) {
     notify("허브와 연결이 끊겨 있습니다. 다시 연결되면 보내 주세요.", "warn");
     return false;
@@ -538,7 +538,7 @@ export async function sendText(text: string): Promise<boolean> {
     // 빈 세션은 첫 메시지 때 만든다. 제목은 첫 메시지 앞 20자
     try {
       const { model, groupId } = get().draft;
-      const title = text.trim().replace(/\s+/g, " ").slice(0, TITLE_LEN);
+      const title = (text.trim() || files[0]?.name || "").replace(/\s+/g, " ").slice(0, TITLE_LEN);
       const s = await api.createSession(title, groupId, model);
       sid = s.id;
       set((st) => ({
@@ -555,12 +555,13 @@ export async function sendText(text: string): Promise<boolean> {
     }
   }
   // 모델은 허브가 세션에 저장된 값으로 정한다
-  const ok = socket.send({ type: "send", session_id: sid, payload: { text } });
+  const payload = files.length ? { text, attachments: files.map((f) => f.id) } : { text };
+  const ok = socket.send({ type: "send", session_id: sid, payload });
   if (!ok) {
     notify("전송하지 못했습니다. 연결을 확인해 주세요.", "warn");
     return false;
   }
-  updateChat(sid, (c) => addOptimisticUser(c, text, new Date().toISOString()));
+  updateChat(sid, (c) => addOptimisticUser(c, text, new Date().toISOString(), files));
   return true;
 }
 

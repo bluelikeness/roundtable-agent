@@ -75,6 +75,10 @@ class MockDriver:
     def image_text(self) -> str | None:
         return "[mock:image] 사진 보여줘"
 
+    def file_text(self) -> str | None:
+        """첨부를 받고 만든 파일을 돌려주게 하는 글. 첨부를 받지 않는 어댑터는 None(→ unsupported 확인)."""
+        return "[mock:file] 이걸로 만들어 줘"
+
     def expire_login(self) -> None:
         compose("exec", "-T", self.service, "rm", "-f", "/data/session.json")
 
@@ -90,6 +94,9 @@ class FakeVooyDriver(MockDriver):
     """Vooy 어댑터 + 가짜 기기(adapters/testing/fake_vooy.py). 지시어 이름만 다르다."""
 
     shared_thread: bool = True  # 앱의 에이전트 대화방은 하나(03 7장)
+
+    def file_text(self) -> str | None:
+        return None  # 첨부는 아직 받지 않는다(휴대폰 경로는 공유하기 작업 뒤)
 
     def normal_text(self, s: str) -> str:
         return s
@@ -134,6 +141,9 @@ class PhoneChatDriver(MockDriver):
     phone_service: str = "fake-phone"
     app_dir: str = ""  # 가짜 휴대폰 안 앱 상태 폴더
 
+    def file_text(self) -> str | None:
+        return None  # 첨부는 아직 받지 않는다(휴대폰 경로는 공유하기 작업 뒤)
+
     def normal_text(self, s: str) -> str:
         return s
 
@@ -166,6 +176,9 @@ class LiveVooyDriver(MockDriver):
     """
 
     shared_thread: bool = True
+
+    def file_text(self) -> str | None:
+        return None  # 첨부는 아직 받지 않는다(휴대폰 경로는 공유하기 작업 뒤)
 
     def normal_text(self, s: str) -> str:
         return f"(자동 시험) '{s}' 라고만 짧게 답해줘"

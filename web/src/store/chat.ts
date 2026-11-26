@@ -10,7 +10,8 @@
  * - 이미 처리한 이벤트(seq <= lastEventSeq)는 통째로 무시한다. 재연결 시 since_seq 로 쓴다.
  * - 대기 말풍선은 bot.pending 의 seq 자리에 놓고, bot.reply 가 같은 tool_call_id 로 그 자리를 차지한다.
  */
-import type { HubEvent, MessageOut } from "../api/types";
+import type { FileRef, HubEvent, MessageOut } from "../api/types";
+import { parseFiles } from "../features/structured";
 
 export interface BaseItem {
   /** React key. 서버 항목은 "s<seq>", 대기 말풍선은 "t<tool_call_id>", 낙관적 항목은 "l<n>" */
@@ -25,6 +26,8 @@ export interface BaseItem {
 export interface UserItem extends BaseItem {
   kind: "user";
   text: string;
+  /** 붙인 파일(허브 파일 보관함) */
+  attachments?: FileRef[];
   /** ack 전(회색) */
   optimistic: boolean;
 }
@@ -123,7 +126,7 @@ export function itemFromMessage(m: MessageOut): ChatItem | null {
   const base = { key: `s${m.seq}`, seq: m.seq, order: m.seq, ts: m.created_at };
   switch (m.role) {
     case "user":
-      return { ...base, kind: "user", text: m.raw, optimistic: false };
+      return { ...base, kind: "user", text: m.raw, optimistic: false, attachments: userFiles(m.structured) };
     case "claude":
       if (m.structured?.kind === "final") return { ...base, kind: "final", text: m.raw };
       return { ...base, kind: "note", text: m.raw };
@@ -163,9 +166,16 @@ export function loadMessages(state: ChatState, messages: MessageOut[]): ChatStat
 
 // --- 사용자 입력(낙관적) ---
 
-export function addOptimisticUser(state: ChatState, text: string, ts: string): ChatState {
+/** 사용자 메시지의 structured.attachments(허브가 붙인 파일 목록) */
+function userFiles(st: MessageOut["structured"]): FileRef[] | undefined {
+  const files = parseFiles((st as Record<string, unknown> | null)?.attachments);
+  return files.length ? files : undefined;
+}
+
+export function addOptimisticUser(state: ChatState, text: string, ts: string, attachments?: FileRef[]): ChatState {
   const n = state.localCounter + 1;
   const item: UserItem = { key: `l${n}`, seq: null, order: OPTIMISTIC_ORDER, ts, kind: "user", text, optimistic: true };
+  if (attachments?.length) item.attachments = attachments;
   return { ...state, items: [...state.items, item], localCounter: n };
 }
 

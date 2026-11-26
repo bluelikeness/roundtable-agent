@@ -55,6 +55,20 @@ STRUCTURED_SCHEMA = {
                 "properties": {"url": {"type": "string"}, "alt": {"type": "string"}},
             },
         },
+        "files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["id", "name", "mime", "size"],
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string", "pattern": "^f_[A-Za-z0-9_-]{16,64}$"},
+                    "name": {"type": "string"},
+                    "mime": {"type": "string"},
+                    "size": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
         "choices": {"type": "array", "items": {"type": "string"}},
         "confirmation_required": {
             "type": "object",
@@ -75,7 +89,7 @@ ASK_RESULT_SCHEMA = {
         "raw": {"type": "string"},
         "structured": STRUCTURED_SCHEMA,
         "needs_input": {"type": "boolean"},
-        "error": {"enum": [None, "timeout", "unavailable", "login_required", "rate_limited", "internal"]},
+        "error": {"enum": [None, "timeout", "unavailable", "login_required", "rate_limited", "internal", "unsupported"]},
         "latency_ms": {"type": "integer", "minimum": 0},
         "message_ids": {"type": "array", "items": {"type": "string"}},
     },
@@ -102,6 +116,12 @@ ASK_INPUT_SCHEMA = {
         "thread_id": {"type": "string", "description": "허브 세션 ID. 같은 ID면 같은 봇 대화를 잇는다"},
         "timeout_s": {"type": "integer", "default": 120, "minimum": 10, "maximum": 240},
         "reset": {"type": "boolean", "default": False, "description": "true면 봇 대화를 새로 시작한 뒤 보낸다"},
+        "attachments": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"type": "string", "pattern": "^f_[A-Za-z0-9_-]{16,64}$"},
+            "description": "허브 파일 ID. 사용자 글의 [첨부 파일] 목록이나 다른 봇 답의 structured.files[].id 를 그대로 넣는다",
+        },
     },
 }
 
