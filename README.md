@@ -45,8 +45,8 @@ Write in a **room** on the web page as you would to a person. Claude decides whi
 | On your phone, tell Pickle "send this to the roundtable room" | An outside assistant **posts into a room** and gets the answer back |
 
 Up to 5 files per message, 100 MB each, kept on the server for 30 days. The phone assistants (Pickle, Muse) accept any file type (refused if the assistant app's Share doesn't take
-that type): the worker puts files into the assistant app with Android's Share, and brings back photos, videos,
-audio and downloaded files the app saved on the phone with the answer (allow "photos and videos" in the worker
+that type): the worker puts files into the assistant app with Android's Share, and brings back images in the answer by pressing the app's own save button, plus photos, videos,
+audio and downloaded files the app saved on the phone (allow "photos and videos" in the worker
 app; on Android 11+ also turn on "all files access" to bring back downloaded documents). Vooy and Cue don't accept files yet.
 
 Anything that costs money — payments, booking confirmations — is **always asked first.** The summary ends with
