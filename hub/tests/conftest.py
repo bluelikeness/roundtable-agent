@@ -37,7 +37,7 @@ from app.models import Operator  # noqa: E402
 HUB_DIR = Path(__file__).resolve().parents[1]
 USERNAME = "operator"
 PASSWORD = "correct horse battery staple"
-TABLES = "hub_file, room_message, participant, room, tool_call, run, message, bot_thread, session, session_group, bot, operator"
+TABLES = "hub_file, tool_call, run, message, bot_thread, session, session_group, bot, operator"
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -42,8 +42,6 @@ services:
       HUB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-roundtable}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-roundtable}
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?.env 에 HUB_SECRET_KEY 가 필요합니다}
       HUB_COOKIE_SECURE: ${HUB_COOKIE_SECURE:-true}
-      # 열린 방 링크 전용 안내 페이지의 바깥 주소. PUBLIC_HOST 가 없으면 비어 요청 주소를 쓴다
-      HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:-${PUBLIC_HOST:+https://${PUBLIC_HOST}}}
       HUB_RUNNER_URL: http://runner:8700
       # 바깥 입구 POST /api/inbox 토큰(비면 닫힘). 피클 등이 방에 의견을 넣을 때 쓴다
       HUB_INBOX_TOKEN: ${HUB_INBOX_TOKEN:-}
