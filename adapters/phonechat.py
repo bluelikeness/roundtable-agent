@@ -32,6 +32,9 @@ selectors.yaml 키 (input·input_u2·send 는 셀렉터 하나 또는 후보 목
   login_markers     로그인 화면에만 있는 글자
   text_from_desc    true 면 글을 content-desc 에서도 읽는다(Flutter 앱: Cue. 말풍선 글이 text 가 아니라 desc 에 있다)
   send_only_with_text  true 면 전송 버튼이 글이 있을 때만 보인다(누른 뒤 사라지면 전송됨)
+  save_media    결과 저장: 답 안의 그림·파일(내 말풍선 아래의 큰 누를 수 있는 노드)을 눌러 크게 보기를 연 뒤 누를
+                저장 버튼 셀렉터 목록. 봇 앱은 결과를 채팅에만 보여 주므로, 이걸 눌러야 휴대폰에 저장돼 가져올 수 있다
+                (2026-11-27 노트9: 피클 "사진 저장", 뮤즈 "다운로드")
   share_steps   첨부: 공유하기로 파일을 넘긴 뒤 앱이 띄우는 중간 화면에서 차례로 누를 셀렉터 목록(대화 고르기 등).
                 보이는 것만 누르고, 끝나면 입력창이 보여야 한다
 
@@ -299,6 +302,13 @@ class PhoneChatAdapter(AndroidAdapter):
 
     FILES_SINCE_MARGIN_MS = 3000  # 휴대폰·서버 시계 차이 여유
     COLLECT_MAX = 5
+    SAVE_MIN_PX = 200  # 답 안의 그림으로 볼 최소 크기(가로·세로)
+    SAVE_WAIT_S = 4.0  # 그림을 누른 뒤 저장 버튼이 뜨기를 기다리는 시간
+    SAVED_WAIT_S = 8.0  # 저장을 누른 뒤 파일이 휴대폰에 생기기를 기다리는 시간(뮤즈는 내려받는다)
+    # 크게 보기가 뜬 뒤 저장을 누르기까지, 누른 뒤 닫기까지. 2026-11-27 노트9 뮤즈: 뜨자마자 누르고 1초 뒤 닫으면
+    # 내려받기가 시작되지 않았다(손으로 몇 초 두고 하면 됨)
+    VIEWER_SETTLE_S = 1.5
+    AFTER_SAVE_S = 2.5
     SHARE_INPUT_WAIT_S = 10.0
 
     async def _run(self, text, thread_id, reset, t0, deadline, record, attachments=None):  # type: ignore[override]
@@ -341,13 +351,77 @@ class PhoneChatAdapter(AndroidAdapter):
                 await asyncio.sleep(0.5)
         log.info("첨부 %d개를 공유하기로 넣음", len(files))
 
+    def _reply_media(self, root: UiNode) -> list[UiNode]:
+        """내 말풍선 아래의 답 그림·파일: 글이 없는 큰 누를 수 있는 노드(위→아래)."""
+        anchor = self._own_anchor(root)
+        if anchor is None:
+            return []
+        floor = self._floor(root)
+        out: list[UiNode] = []
+        for n in self._app_nodes(root):
+            b = n.bounds
+            if not n.clickable or b.empty or b.top < anchor.bounds.bottom or b.bottom > floor:
+                continue
+            if b.right - b.left < self.SAVE_MIN_PX or b.bottom - b.top < self.SAVE_MIN_PX or n.text.strip():
+                continue
+            if any(o.bounds.contains(b) and o is not n for o in out):
+                continue
+            out = [o for o in out if not b.contains(o.bounds)]
+            out.append(n)
+        return sorted(out, key=lambda n: (n.bounds.top, n.bounds.left))[: self.COLLECT_MAX]
+
+    async def _save_reply_media(self) -> int:
+        """답 안의 그림을 하나씩 눌러 앱의 저장 버튼을 누른다(save_media). 누른 수."""
+        save = self.sel.get("save_media")
+        if not save or not self.phone_mode or not self._sent_norm:
+            return 0
+        saved = 0
+        async with self.screen():
+            await self.ensure_foreground()
+            root = await self.tree()
+            items = self._reply_media(root)
+            for i in range(len(items)):
+                root = await self.tree()
+                cur = self._reply_media(root)
+                if i >= len(cur):
+                    break
+                await self.tap(cur[i])
+                loop = asyncio.get_running_loop()
+                end = loop.time() + self.SAVE_WAIT_S
+                btn = None
+                while btn is None and loop.time() < end:
+                    await asyncio.sleep(0.5)
+                    btn = find_first(await self.tree(), save)
+                if btn is not None:
+                    await asyncio.sleep(self.VIEWER_SETTLE_S)
+                    await self.tap(btn)
+                    saved += 1
+                    await asyncio.sleep(self.AFTER_SAVE_S)
+                await self.device.press("back")  # 크게 보기 닫기
+                await asyncio.sleep(1.0)
+                if find_first(await self.tree(), self.sel["input"]) is None:
+                    await self.device.press("back")
+                    await asyncio.sleep(1.0)
+        if saved:
+            log.info("답 안의 그림 %d개를 앱에서 저장함", saved)
+        return saved
+
     async def _collect_files(self) -> list:
-        """이 질문 동안 봇 앱이 휴대폰에 저장한 사진·영상을 허브에 올린다. 실패는 답을 막지 않는다."""
+        """이 질문 동안 봇 앱이 휴대폰에 저장한 파일을 허브에 올린다. 실패는 답을 막지 않는다."""
         since, self._files_since_ms = self._files_since_ms, None
         if not (self.android.collect_files and since and hasattr(self.device, "media_since")):
             return []
         try:
+            saved = await self._save_reply_media()
+        except Exception as e:  # noqa: BLE001 - 저장 실패는 답을 막지 않는다
+            log.info("답 안의 그림 저장 실패: %s", e)
+            saved = 0
+        try:
             found = await self.device.media_since(since, self.android.package)
+            end = time.monotonic() + self.SAVED_WAIT_S
+            while saved and not found.get("items") and time.monotonic() < end:
+                await asyncio.sleep(1.0)  # 내려받기는 저장을 누른 뒤 조금 걸린다
+                found = await self.device.media_since(since, self.android.package)
         except Exception as e:  # noqa: BLE001
             log.info("저장 파일 확인 실패: %s", e)
             return []

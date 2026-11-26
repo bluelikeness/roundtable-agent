@@ -15,7 +15,8 @@ text 지시어로 결과를 고정한다.
   [chat:buttons]  버튼 두 개("예약", "다른 곳")가 달린 응답
   [chat:confirm]  결제 확인 버튼("결제하기")이 달린 응답
   [chat:progress] 진행 메시지를 먼저 보내고 실제 응답
-  [chat:file]     파일 하나를 "휴대폰에 저장"한다(첫 첨부가 있으면 mock-<이름>, 없으면 fake.png). 가짜 휴대폰 저장소로 간다
+  [chat:file]     답에 그림 하나를 띄운다(첫 첨부가 있으면 mock-<이름>, 없으면 fake.png). 실제 앱처럼 저장하지 않는다.
+                  그림을 누르면 크게 보기가 뜨고, 저장 버튼(PROFILES save_desc)을 눌러야 가짜 휴대폰 저장소로 간다
   그 밖           "echo: <본문>"
 공유하기로 받은 첨부가 있으면 답 끝에 "받은 첨부: <이름들>"을 붙인다.
 로그인 상태는 <dir>/session 파일 유무. 지우면 로그인 화면이 나온다.
@@ -39,6 +40,7 @@ PROFILES = {
     "com.pickle.client": {
         "input": {"rid": "", "desc": ""},
         "send": {"cls": "android.view.View", "rid": "", "desc": "보내기", "only_when_text": True},
+        "save_desc": "사진 저장",
         "channel": "messages",
         "progress_channel": None,
         "per_message_notif": True,
@@ -48,6 +50,7 @@ PROFILES = {
     "com.facebook.aura": {
         "input": {"rid": "hatch-message-input", "desc": ""},
         "send": {"cls": "android.widget.Button", "rid": "hatch-send-button", "desc": "메시지 보내기", "only_when_text": False},
+        "save_desc": "다운로드",
         "channel": "aura_conversations",
         "progress_channel": "aura_run_in_background",
         "per_message_notif": False,
@@ -74,6 +77,7 @@ class Msg:
     role: str  # own | bot
     text: str
     buttons: list[str] = field(default_factory=list)
+    media: tuple[str, str, bytes] | None = None  # 답 안의 그림(이름, 종류, 내용)
 
 
 class FakeChatApp:
@@ -102,6 +106,7 @@ class FakeChatApp:
         self.attached: list[tuple[str, str, bytes]] = []
         # 가짜 휴대폰이 꽂는다: (이름, 종류, 내용) 을 휴대폰 저장소에 남긴다
         self.save: Callable[[str, str, bytes], None] | None = None
+        self.viewer: tuple[str, str, bytes] | None = None  # 크게 보기로 연 그림
 
     @property
     def logged_in(self) -> bool:
@@ -117,8 +122,11 @@ class FakeChatApp:
         self.poisoned = False
 
     async def press(self, key: str) -> None:
-        if key == "home":
+        if key == "back" and self.viewer is not None:
+            self.viewer = None
+        elif key == "home":
             self.foreground = False
+            self.viewer = None
 
     # 안드로이드 10 노트9 의 뮤즈 흉내: set_text 는 성공을 돌려주지만 글이 들어가지 않고, 그 뒤로는 앱을 다시
     # 열 때까지 붙여넣기도 안 먹는다. 포커스를 준 뒤 붙여넣기만 된다
@@ -197,9 +205,9 @@ class FakeChatApp:
         files, self.attached = self.attached, []
         if files:
             reply[-1] = Msg("bot", reply[-1].text + " 받은 첨부: " + ", ".join(n for n, _, _ in files), reply[-1].buttons)
-        if "file" in directives and self.save is not None:
-            name, mime, data = (f"mock-{files[0][0]}", files[0][1], files[0][2]) if files else ("fake.png", "image/png", b"fake")
-            self.save(name, mime, data)
+        if "file" in directives:
+            media = (f"mock-{files[0][0]}", files[0][1], files[0][2]) if files else ("fake.png", "image/png", b"fake")
+            reply.append(Msg("bot", "", media=media))
         if "progress" in directives:
             reply.insert(0, Msg("bot", "찾아볼게요…"))
         self._later(reply)
@@ -212,6 +220,13 @@ class FakeChatApp:
 
     def _focus(self) -> None:
         self.focused = True
+
+    def _open_viewer(self, media: tuple[str, str, bytes]) -> None:
+        self.viewer = media
+
+    def _save_viewer(self) -> None:
+        if self.viewer is not None and self.save is not None:
+            self.save(*self.viewer)
 
     def _tap_button(self, label: str) -> None:
         self._later([Msg("bot", "결제가 완료되었습니다." if label == "결제하기" else f"'{label}' 선택하셨습니다.")])
@@ -260,6 +275,16 @@ class FakeChatApp:
         parts.append("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation=\"0\">")
         if not self.foreground:
             node("android.widget.FrameLayout", (0, 0, W, H), desc="Home")
+        elif self.viewer is not None:
+            # 크게 보기: 뒤로·저장 버튼만
+            node("android.widget.FrameLayout", (0, 0, W, H), close=False)
+            node("android.view.View", (37, 74, 163, 200), desc="뒤로", clickable=True)
+            if self.p.get("save_desc"):
+                sb = (917, 74, 1043, 200)
+                node("android.view.View", sb, desc=self.p["save_desc"], clickable=True)
+                self._targets.append((sb, self._save_viewer))
+            node("android.widget.ImageView", (0, 600, W, 1800))
+            parts.append("</node>")
         elif not self.logged_in:
             node("android.widget.FrameLayout", (0, 0, W, H), close=False)
             node("android.widget.TextView", (100, 1500, 980, 1600), text="로그인", clickable=True)
@@ -270,12 +295,17 @@ class FakeChatApp:
             rows: list[tuple[Msg, int, int]] = []
             y = INPUT_TOP - 20
             for m in reversed(self.messages):
-                h = 100 + 40 * (len(m.text) // 25) + (110 if m.buttons else 0)
+                h = 420 if m.media else 100 + 40 * (len(m.text) // 25) + (110 if m.buttons else 0)
                 if y - h < TOP:
                     break
                 y -= h
                 rows.append((m, y, h))
             for m, top, h in reversed(rows):
+                if m.media is not None:
+                    mb = (32, top, 432, top + 400)
+                    node("android.view.View", mb, clickable=True)
+                    self._targets.append((mb, lambda media=m.media: self._open_viewer(media)))
+                    continue
                 th = h - (110 if m.buttons else 0) - 20
                 body = {"desc": m.text} if self.p.get("bubble_attr") == "desc" else {"text": m.text}
                 cls = "android.view.View" if self.p.get("bubble_attr") == "desc" else "android.widget.TextView"

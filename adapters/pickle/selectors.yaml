@@ -19,6 +19,9 @@ exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*[AaPp][Mm])?\s*$|^\s
 exclude_button_re: '^(Voice chat|Dictate|Add attachment|Menu|Invite friends|보내기|음성|첨부)$'
 # 대화 목록 위에 겹친 머리 부분(프로필 이름·친구 초대). 내 말풍선이 위로 잘리면 답 앞에 섞였다(2026-11-12 실기기)
 exclude_inside_desc_re: '프로필$|^친구 초대$|^(Profile|Invite friends)$'
+# 답 안의 그림을 누르면 뜨는 크게 보기의 저장 버튼(2026-11-27 노트9 1.1.20)
+save_media:
+  - {desc_re: '^(사진 저장|Save photo|Save)$'}
 confirm_button_re: '(결제|구매|예약 확정|확정|Pay|Confirm)'
 login_markers:
   - Continue with Google

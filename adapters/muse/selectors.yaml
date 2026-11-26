@@ -16,6 +16,9 @@ chat_tabs: []
 # 시각, 읽음 표시("방금 읽음"·"3분 전 읽음"·Read·Seen)는 답이 아니다(2026-11-11 실기기: 피클 "방금 읽음"을 답으로 오인)
 exclude_text_re: '^\s*((오전|오후)\s*)?\d{1,2}:\d{2}(\s*[AaPp][Mm])?\s*$|^\s*((방금|\d+\s*(초|분|시간)\s*전)\s*)?읽음\s*$|^(Read|Seen)\b'
 exclude_button_re: '^(메시지 보내기|Send|음성|Voice)$'
+# 답 안의 그림을 누르면 뜨는 크게 보기의 내려받기 버튼(2026-11-27 노트9 17.1.0.28.160)
+save_media:
+  - {desc_re: '^(다운로드|Download|저장|Save)$'}
 confirm_button_re: '(결제|구매|확정|Pay|Confirm)'
 login_markers:
   - Log in

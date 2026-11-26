@@ -109,7 +109,9 @@ relay (15 minutes) and are not kept on the worker.
   them to the gateway (`POST /phone/files`). Opening the worker screen asks for **photos and videos** access; allow it
   (the worker screen shows "사진·영상 읽기: 허용됨"). Downloaded documents (PDF etc.): fine on Android 10 (Note9);
   on 11+ turn on all files access with the worker screen's button.
-- Results the app only shows in its chat without saving them to the phone can't be collected yet.
+- Assistant apps only show result images in the chat. The adapter taps the image and the app's save button
+  (selectors.yaml `save_media`), then collects the saved file. Results without a save button (e.g. video links)
+  can't be collected yet.
 
 ## Roundtable app (phone/client)
 
