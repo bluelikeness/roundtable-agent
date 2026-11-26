@@ -16,9 +16,6 @@ from app.files import internal as files_internal_router
 from app.files import purge_loop
 from app.files import router as files_router
 from app.inbox import router as inbox_router
-from app.rooms import join_router
-from app.rooms import op_router as rooms_router
-from app.rooms import p_router as participant_router
 from app.runner_client import RemoteRunner
 from app.runs import RunManager
 from app.ws import router as ws_router
@@ -58,9 +55,6 @@ app.include_router(ws_router)
 app.include_router(bots_router)
 app.include_router(internal_router)
 app.include_router(inbox_router)
-app.include_router(rooms_router)
-app.include_router(participant_router)
-app.include_router(join_router)
 app.include_router(files_router)
 app.include_router(files_internal_router)
 

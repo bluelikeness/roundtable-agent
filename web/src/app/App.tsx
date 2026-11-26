@@ -9,8 +9,6 @@ import { Sheet } from "../features/bots/Sheet";
 import { ChatView } from "../features/chat/ChatView";
 import { SessionList } from "../features/sessions/SessionList";
 import { useMobile } from "../lib/media";
-import { roomRoute } from "../features/rooms/callText";
-import { RoomsView } from "../features/rooms/RoomsView";
 import {
   checkAuth,
   closeSheet,
@@ -29,9 +27,6 @@ function Account() {
   return (
     <div className="account">
       <span className="muted">{username}</span>
-      <button className="link" onClick={() => (window.location.hash = "#/rooms")}>
-        열린 방
-      </button>
       <button className="link" onClick={() => void logout()}>
         로그아웃
       </button>
@@ -61,17 +56,13 @@ export function App() {
   const ui = useStore((s) => s.ui);
   const mobile = useMobile();
   const [collapsed, setCollapsed] = useState(false);
-  const [rooms, setRooms] = useState(() => roomRoute());
-  const username = useStore((s) => s.username);
 
   useEffect(() => {
     setUnauthorizedHandler(logoutLocal);
     void checkAuth();
     const onVisible = () => document.visibilityState === "visible" && reconnectNow();
     const onHash = () => {
-      const r = roomRoute();
-      setRooms(r);
-      if (!r && useStore.getState().auth === "authed") openSession(sessionFromHash());
+      if (useStore.getState().auth === "authed") openSession(sessionFromHash());
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", reconnectNow);
@@ -91,7 +82,6 @@ export function App() {
 
   if (auth === "unknown") return <main className="loading muted">불러오는 중…</main>;
   if (auth === "anon") return <Login />;
-  if (rooms) return <RoomsView roomId={rooms.roomId} me={username} />;
 
   if (mobile) {
     return (
