@@ -15,7 +15,9 @@ text 지시어로 결과를 고정한다.
   [chat:buttons]  버튼 두 개("예약", "다른 곳")가 달린 응답
   [chat:confirm]  결제 확인 버튼("결제하기")이 달린 응답
   [chat:progress] 진행 메시지를 먼저 보내고 실제 응답
+  [chat:file]     파일 하나를 "휴대폰에 저장"한다(첫 첨부가 있으면 mock-<이름>, 없으면 fake.png). 가짜 휴대폰 저장소로 간다
   그 밖           "echo: <본문>"
+공유하기로 받은 첨부가 있으면 답 끝에 "받은 첨부: <이름들>"을 붙인다.
 로그인 상태는 <dir>/session 파일 유무. 지우면 로그인 화면이 나온다.
 """
 
@@ -96,6 +98,10 @@ class FakeChatApp:
         self._targets: list[tuple[tuple[int, int, int, int], Callable[[], None]]] = []
         # 가짜 휴대폰이 꽂는다: (채널, posted?) 알림을 올린다
         self.notify: Callable[[str, str, bool], None] | None = None
+        # 공유하기로 받은 첨부(이름, 종류, 내용). 다음 전송에 붙는다
+        self.attached: list[tuple[str, str, bytes]] = []
+        # 가짜 휴대폰이 꽂는다: (이름, 종류, 내용) 을 휴대폰 저장소에 남긴다
+        self.save: Callable[[str, str, bytes], None] | None = None
 
     @property
     def logged_in(self) -> bool:
@@ -188,6 +194,12 @@ class FakeChatApp:
             reply = [Msg("bot", "KTX 서울→부산 11/12 07:00 결제 58,800원. 진행할까요?", ["결제하기"])]
         else:
             reply = [Msg("bot", f"echo: {body}")]
+        files, self.attached = self.attached, []
+        if files:
+            reply[-1] = Msg("bot", reply[-1].text + " 받은 첨부: " + ", ".join(n for n, _, _ in files), reply[-1].buttons)
+        if "file" in directives and self.save is not None:
+            name, mime, data = (f"mock-{files[0][0]}", files[0][1], files[0][2]) if files else ("fake.png", "image/png", b"fake")
+            self.save(name, mime, data)
         if "progress" in directives:
             reply.insert(0, Msg("bot", "찾아볼게요…"))
         self._later(reply)

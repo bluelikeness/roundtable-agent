@@ -32,6 +32,13 @@ selectors.yaml 키 (input·input_u2·send 는 셀렉터 하나 또는 후보 목
   login_markers     로그인 화면에만 있는 글자
   text_from_desc    true 면 글을 content-desc 에서도 읽는다(Flutter 앱: Cue. 말풍선 글이 text 가 아니라 desc 에 있다)
   send_only_with_text  true 면 전송 버튼이 글이 있을 때만 보인다(누른 뒤 사라지면 전송됨)
+  share_steps   첨부: 공유하기로 파일을 넘긴 뒤 앱이 띄우는 중간 화면에서 차례로 누를 셀렉터 목록(대화 고르기 등).
+                보이는 것만 누르고, 끝나면 입력창이 보여야 한다
+
+첨부(2026-11-27, config.yaml android.accepts_files·collect_files)
+  넣기: 허브 파일 → 게이트웨이 중계(/files) → 워커가 받아 공유하기(ACTION_SEND)로 봇 앱에 넘긴다 → 이어서 글을 보낸다.
+  가져오기: collect_files 면 질문하는 동안 그 앱이 휴대폰에 저장한 사진·영상(MediaStore OWNER_PACKAGE_NAME)을
+  워커가 게이트웨이로 올리고, 어댑터가 받아 허브에 올려 structured.files 로 돌려준다.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ from adapters.android_base import AndroidAdapter, Bounds, UiNode, clean_text
 from adapters.base import (
     AdapterConfig,
     AdapterError,
+    Attachment,
     BackendDown,
     Button,
     Confirmation,
@@ -60,6 +68,7 @@ from adapters.base import (
     RawMessage,
     Structured,
     Thread,
+    Unsupported,
     VncLogin,
 )
 from adapters.learned import LearnedSelectors, app_key, device_id
@@ -186,6 +195,11 @@ class PhoneChatAdapter(AndroidAdapter):
         self._sdk: int | None = None
         self._set_text_used = False
         self._profile_at = -1e9
+        # 첨부: 휴대폰 경로(공유하기를 아는 워커)에서만 연다
+        if self.android.accepts_files and hasattr(self.device, "share"):
+            self.accepts_files = tuple(self.android.accepts_files)
+        self._files_since_ms: int | None = None
+        self._collected: set[int] = set()  # 이미 가져온 저장 파일(시계 여유 때문에 다음 질문에서 다시 보이지 않게)
 
     # --- 화면 읽기 ---------------------------------------------------------
 
@@ -278,6 +292,77 @@ class PhoneChatAdapter(AndroidAdapter):
             await self.ensure_device()  # 개인 폰: 상태 확인만으로 앱을 열지 않는다
             return
         await self._ensure_ready()
+
+    # --- 첨부 --------------------------------------------------------------
+
+    FILES_SINCE_MARGIN_MS = 3000  # 휴대폰·서버 시계 차이 여유
+    COLLECT_MAX = 5
+    SHARE_INPUT_WAIT_S = 10.0
+
+    async def _run(self, text, thread_id, reset, t0, deadline, record, attachments=None):  # type: ignore[override]
+        # 질문 하나 동안 봇 앱이 저장한 파일을 가져오기 위한 시작 시각(ask 는 봇마다 하나씩 돈다)
+        self._files_since_ms = int(time.time() * 1000) - self.FILES_SINCE_MARGIN_MS
+        return await super()._run(text, thread_id, reset, t0, deadline, record, attachments)
+
+    async def _attach(self, thread: Thread, files: list[Attachment]) -> None:
+        """공유하기로 봇 앱에 파일을 넘긴다. 화면을 잡은 채 _send 로 이어진다(사이에 다른 봇이 앱을 바꾸지 않게)."""
+        if not hasattr(self.device, "share"):
+            raise Unsupported("휴대폰 경로에서만 첨부를 받는다")
+        staged = [
+            {"code": await self.device.stage_file(f.path, f.name, f.mime), "name": f.name, "mime": f.mime} for f in files
+        ]
+        async with self.screen():
+            await self.ensure_device()
+            res = await self.device.share(self.android.package, staged)
+            if res.get("foreground") != self.android.package:
+                raise BackendDown(f"{self.name} 앱이 공유하기로 열리지 않음")
+            loop = asyncio.get_running_loop()
+            end = loop.time() + self.SHARE_INPUT_WAIT_S
+            steps = list(self.sel.get("share_steps") or [])
+            while True:
+                root = await self.tree()
+                if self._is_login_screen(root):
+                    raise LoginRequired(f"{self.name} 로그인 화면")
+                if find_first(root, self.sel["input"]) is not None:
+                    break
+                step = next((n for n in (find_first(root, sel) for sel in steps) if n is not None), None)
+                if step is not None:
+                    await self.tap(step)
+                elif loop.time() >= end:
+                    raise BackendDown(f"{self.name}: 공유한 뒤 대화 입력창이 보이지 않음(share_steps 확인 필요)")
+                await asyncio.sleep(0.5)
+        log.info("첨부 %d개를 공유하기로 넣음", len(files))
+
+    async def _collect_files(self) -> list:
+        """이 질문 동안 봇 앱이 휴대폰에 저장한 사진·영상을 허브에 올린다. 실패는 답을 막지 않는다."""
+        since, self._files_since_ms = self._files_since_ms, None
+        if not (self.android.collect_files and since and hasattr(self.device, "media_since")):
+            return []
+        try:
+            found = await self.device.media_since(since, self.android.package)
+        except Exception as e:  # noqa: BLE001
+            log.info("저장 파일 확인 실패: %s", e)
+            return []
+        if not found.get("access", True):
+            log.warning("워커에 사진·영상 읽기 권한이 없어 봇이 저장한 파일을 가져오지 못함")
+            return []
+        out = []
+        tmp_dir = self.state_dir / "collect"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fresh = [i for i in (found.get("items") or []) if int(i["id"]) not in self._collected]
+        for item in fresh[: self.COLLECT_MAX]:
+            self._collected.add(int(item["id"]))
+            tmp = tmp_dir / f"m{int(item['id'])}"
+            try:
+                meta = await self.device.media_fetch(int(item["id"]), tmp)
+                out.append(await self.publish_file(tmp, str(meta["name"]), str(meta["mime"])))
+            except Exception as e:  # noqa: BLE001
+                log.info("저장 파일 가져오기 실패: %s", e)
+            finally:
+                tmp.unlink(missing_ok=True)
+        if out:
+            log.info("봇이 저장한 파일 %d개를 가져옴", len(out))
+        return out
 
     # --- 전송 --------------------------------------------------------------
 
@@ -932,6 +1017,9 @@ class PhoneChatAdapter(AndroidAdapter):
         if self._thread is not None:
             self._thread.data["buttons"] = labels
         await self.after_read()
+        files = await self._collect_files()
+        if files:
+            s.files = files
         return "\n\n".join(parts), s
 
     # --- 로그인·리셋 -------------------------------------------------------

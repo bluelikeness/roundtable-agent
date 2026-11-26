@@ -19,11 +19,25 @@
     <!-- 안드로이드 14+: 확인 없이 자기 업데이트(USER_ACTION_NOT_REQUIRED)를 하려면 필요하다 -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
+    <!-- 첨부: 봇 앱이 저장한 사진·영상을 찾아 허브로 올린다(사용자가 워커 화면에서 허용) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
     <!-- 런처 인텐트로 봇 앱을 열기 위해 런처 앱 목록을 본다 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- 공유하기로 파일을 받는 앱(봇 앱)을 찾는다 -->
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND_MULTIPLE" />
+            <data android:mimeType="*/*" />
         </intent>
     </queries>
 
@@ -89,5 +103,11 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/a11y" />
         </service>
+        <!-- 공유하기로 봇 앱에 넘기는 첨부(읽기 전용, 인텐트로만 잠깐 권한을 준다) -->
+        <provider
+            android:name=".ShareProvider"
+            android:authorities="dev.roundtable.worker.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 원탁 앱: 원탁 웹 화면(https://<PUBLIC_HOST>/)을 휴대폰 앱으로 감싼 클라이언트.
+     토큰·비밀값은 들어 있지 않고, 로그인은 웹과 똑같이 비밀번호·인증 코드로 한다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.roundtable.app"
+    android:versionCode="1"
+    android:versionName="0.1">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="원탁"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.DeviceDefault.DayNight">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

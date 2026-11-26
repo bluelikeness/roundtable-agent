@@ -91,9 +91,17 @@ public class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         // 앱 화면이 열려 있을 때는 포그라운드라 연결 유지 서비스를 확실히 띄울 수 있다
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
+        // 알림(13+)과 저장된 사진·영상 읽기(첨부 결과 가져오기). 빠진 것만 한 번에 묻는다
+        java.util.ArrayList<String> ask = new java.util.ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 33) {
+            for (String p : new String[]{android.Manifest.permission.POST_NOTIFICATIONS, "android.permission.READ_MEDIA_IMAGES",
+                    "android.permission.READ_MEDIA_VIDEO"}) {
+                if (checkSelfPermission(p) != android.content.pm.PackageManager.PERMISSION_GRANTED) ask.add(p);
+            }
+        } else if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            ask.add(android.Manifest.permission.READ_EXTERNAL_STORAGE);
         }
+        if (!ask.isEmpty()) requestPermissions(ask.toArray(new String[0]), 1);
         KeepAlive.start(this);
         Worker.setStatusListener(s -> status.setText(s));
         WLog.setListener(() -> log.setText(WLog.text()));
@@ -105,7 +113,8 @@ public class MainActivity extends Activity {
         android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
         boolean battery = pm.isIgnoringBatteryOptimizations(getPackageName());
         perms.setText("알림 접근: " + (notif ? "허용됨" : "필요") + "   접근성: " + (acc ? "켜짐" : "필요")
-                + "\n배터리 최적화 예외: " + (battery ? "예" : "아니오(연결이 끊길 수 있음)"));
+                + "\n배터리 최적화 예외: " + (battery ? "예" : "아니오(연결이 끊길 수 있음)")
+                + "\n사진·영상 읽기: " + (Media.canRead(this) ? "허용됨" : "필요(봇이 만든 파일 가져오기)"));
     }
 
     @Override protected void onPause() {

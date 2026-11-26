@@ -142,7 +142,7 @@ class PhoneChatDriver(MockDriver):
     app_dir: str = ""  # 가짜 휴대폰 안 앱 상태 폴더
 
     def file_text(self) -> str | None:
-        return None  # 첨부는 아직 받지 않는다(휴대폰 경로는 공유하기 작업 뒤)
+        return "[chat:file] 이걸로 만들어 줘"  # 공유하기로 받고, 앱이 저장한 파일을 돌려준다
 
     def normal_text(self, s: str) -> str:
         return s
