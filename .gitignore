@@ -8,3 +8,4 @@ node_modules/
 .vooy-state/
 phone/build/
 phone/dist/
+phone/client/build/

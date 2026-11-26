@@ -44,7 +44,9 @@ Write in a **room** on the web page as you would to a person. Claude decides whi
 | Attach a photo with 📎: "make a video from this and pass it on to another assistant" | Hands the file to an assistant and **relays** the file it makes to the next one (assistants that accept files only) |
 | On your phone, tell Pickle "send this to the roundtable room" | An outside assistant **posts into a room** and gets the answer back |
 
-Up to 5 files per message, 100 MB each, kept on the server for 30 days. Today only the mock assistant accepts files; the phone assistants (Pickle, Muse) come in a later step.
+Up to 5 files per message, 100 MB each, kept on the server for 30 days. The phone assistants (Pickle, Muse) accept photos and videos: the worker puts them into the assistant app with
+Android's Share, and brings back photos and videos the app saved on the phone with the answer (allow
+"photos and videos" in the worker app). Vooy and Cue don't accept files yet.
 
 Anything that costs money — payments, booking confirmations — is **always asked first.** The summary ends with
 "Shall I proceed?" and a [Proceed] button; nothing is confirmed until you press it.
@@ -271,6 +273,9 @@ flowchart LR
    and enable notification access and the accessibility service. To add another phone, make a new QR and install
    the same way. Details: [phone/README.md](phone/README.md).
 6. Open `https://<your domain>`, sign in, create a room — done.
+7. (Optional) **Roundtable app**: to use Roundtable as a phone app, run `phone/client/release.sh` for a one-time
+   QR code (30 minutes), scan it and install. It wraps the web UI, so sign-in is the same, and 📎 attachments and
+   file downloads work. It is a separate app from the worker that drives the bots.
 
 > Want to try it with fake assistants first? Stop after step 3, start them with
 > `docker compose --profile mock up -d`, register `mock-a` and `mock-b` in `hub/bots.yaml`,

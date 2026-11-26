@@ -17,8 +17,12 @@ import base64
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+
+import httpx
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
@@ -54,6 +58,10 @@ class FakePhone:
         self.chats = {pkg: FakeChatApp(pkg, base / f"fake-{pkg.split('.')[-1]}") for pkg in ("com.pickle.client", "com.facebook.aura", "ai.manus.agents")}
         for app in self.chats.values():
             app.notify = lambda ch, key, posted, app=app: self._chat_notif(app, ch, key, posted)
+            app.save = lambda name, mime, data, app=app: self._save_media(app.pkg, name, mime, data)
+        # 휴대폰 저장소 흉내(MediaStore): id → {name, mime, data, date_ms, owner}
+        self.media: dict[int, dict[str, Any]] = {}
+        self.media_access = True  # 사진·영상 읽기 권한
         self.locked_file = Path(locked_file) if locked_file else None
         self.watch: set[str] = set()
         self.notif_id = 0
@@ -110,6 +118,57 @@ class FakePhone:
             return LAUNCHER
         return VOOY_PKG if app is self.vooy else app.pkg
 
+    def _save_media(self, pkg: str, name: str, mime: str, data: bytes) -> None:
+        mid = len(self.media) + 1
+        self.media[mid] = {"name": name, "mime": mime, "data": data, "date_ms": int(time.time() * 1000), "owner": pkg}
+
+    def _files_url(self, code: str | None = None) -> str:
+        """ws://host/phone/ws → http://host/phone/files[/code] (워커 Media.filesUrl 과 같다)."""
+        base = self.url.replace("wss://", "https://", 1).replace("ws://", "http://", 1).split("/phone/ws")[0]
+        return f"{base}/phone/files" + (f"/{code}" if code else "")
+
+    async def _share(self, args: dict[str, Any]) -> dict[str, Any]:
+        pkg = str(args["pkg"])
+        app = self.chats.get(pkg)
+        if app is None:
+            raise RuntimeError(f"이 앱은 공유하기로 이런 파일을 받지 않음: {pkg}")
+        got = []
+        async with httpx.AsyncClient(timeout=30, headers={"Authorization": f"Bearer {self.token}"}) as c:
+            for f in args["files"]:
+                r = await c.get(self._files_url(str(f["code"])))
+                if r.status_code != 200:
+                    raise RuntimeError(f"파일 받기 HTTP {r.status_code}")
+                got.append((str(f.get("name") or "file"), str(f.get("mime") or "application/octet-stream"), r.content))
+        for a in (self.vooy, *self.chats.values()):
+            a.foreground = False
+        await app.app_start(pkg)
+        app.attached = got
+        return {"shared": len(got), "foreground": self._fg_pkg()}
+
+    def _media_since(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.media_access:
+            return {"items": [], "access": False}
+        since, pkg = int(args["since_ms"]), args.get("pkg")
+        items = [
+            {"id": mid, "name": m["name"], "mime": m["mime"], "size": len(m["data"]), "date_ms": m["date_ms"], "owner": m["owner"]}
+            for mid, m in sorted(self.media.items(), reverse=True)
+            if m["date_ms"] >= since and (not pkg or m["owner"] == pkg)
+        ]
+        return {"items": items, "access": True}
+
+    async def _media_upload(self, args: dict[str, Any]) -> dict[str, Any]:
+        m = self.media.get(int(args["id"]))
+        if m is None:
+            raise RuntimeError("파일 없음")
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                self._files_url(), content=m["data"],
+                headers={"Authorization": f"Bearer {self.token}", "Content-Type": m["mime"], "X-File-Name": quote(m["name"], safe="")},
+            )
+        if r.status_code != 200:
+            raise RuntimeError(f"올리기 HTTP {r.status_code}")
+        return r.json()
+
     async def _send(self, obj: dict[str, Any]) -> None:
         if self._ws is not None:
             try:
@@ -141,6 +200,10 @@ class FakePhone:
         if cmd == "watch":
             self.watch = set(args.get("pkgs") or [])
             return {}
+        if cmd == "media_since":
+            return self._media_since(args)
+        if cmd == "media_upload":
+            return await self._media_upload(args)
         if cmd == "wake":
             woke = False
             if not self.secure and (not self.screen or self.locked):
@@ -164,6 +227,8 @@ class FakePhone:
                 a.foreground = False
             await apps[pkg].app_start(pkg)
             return {"foreground": self._fg_pkg()}
+        if cmd == "share":
+            return await self._share(args)
         if cmd == "global":
             for a in (self.vooy, *self.chats.values()):
                 await a.press(str(args["action"]))

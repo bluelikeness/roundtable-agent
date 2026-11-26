@@ -24,3 +24,6 @@ android:
   verify_margin_s: 0
   # 통화 중 알림(심부름 전화·음성 대화). 2026-11-22 노트9: 음성 버튼이 잘못 눌려 뜬 통화 알림을 답 알림으로 읽었다
   ignore_channels: [calls]
+  # 첨부(2026-11-27): 공유하기로 사진·영상을 넣고, 이 앱이 휴대폰에 저장한 사진·영상을 답의 files 로 가져온다
+  accepts_files: ["image/", "video/"]
+  collect_files: true

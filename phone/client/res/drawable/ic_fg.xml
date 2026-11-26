@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 원탁 아이콘: 둥근 탁자와 둘레의 자리 넷 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#F59E0B"
+        android:pathData="M54,38a16,16 0,1 1,0 32a16,16 0,1 1,0 -32z" />
+    <path android:fillColor="#E5E7EB"
+        android:pathData="M54,22a6,6 0,1 1,0 12a6,6 0,1 1,0 -12z M54,74a6,6 0,1 1,0 12a6,6 0,1 1,0 -12z M28,48a6,6 0,1 1,0 12a6,6 0,1 1,0 -12z M80,48a6,6 0,1 1,0 12a6,6 0,1 1,0 -12z" />
+</vector>

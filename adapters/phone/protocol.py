@@ -38,8 +38,15 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "update_check": ("{}", "{current, latest}  워커가 바로 새 버전을 확인한다(있으면 내려받아 설치)"),
     "app_info": ("{pkg}", "{version_name, version_code}  설치된 앱 버전(셀렉터 기기별 층의 열쇠). 없으면 오류"),
     "logs": ("{}", "{text}  워커 화면 기록(명령 이름·상태만, 메시지 내용 없음). 진단용"),
+    # 첨부(2026-11-27). 파일은 게이트웨이 중계(/phone/files)로 오간다. 워커는 기기 토큰으로 받고 올린다
+    "share": ("{pkg, files: [{code, name, mime}]}",
+              "{shared}  파일을 받아 공유하기(ACTION_SEND·SEND_MULTIPLE)로 pkg 앱에 넘긴다. 공유 뒤 화면은 앱마다 다르다"),
+    "media_since": ("{since_ms, pkg?, mimes?: [str]}",
+                    ("{items: [{id, name, mime, size, date_ms, owner}], access}  since_ms 뒤 휴대폰에 저장된 사진·영상."
+                     " pkg 가 있으면 그 앱이 저장한 것만(안드로이드 10+). access=false 면 저장소 읽기 권한 없음")),
+    "media_upload": ("{id}", "{code, name, mime, size}  media_since 의 항목을 게이트웨이(/phone/files)에 올린다"),
 }
-SCREEN_COMMANDS = frozenset({"launch", "tree", "tap", "click", "click_at", "set_text", "paste", "global", "screenshot"})
+SCREEN_COMMANDS = frozenset({"launch", "tree", "tap", "click", "click_at", "set_text", "paste", "global", "screenshot", "share"})
 
 # 이벤트 종류
 EVENTS = ("notif.posted", "notif.removed", "state.changed")

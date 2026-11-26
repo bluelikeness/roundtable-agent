@@ -63,7 +63,7 @@ final class Commands {
 
     JSONObject run(String cmd, JSONObject a) throws Exception {
         if (!cmd.equals("state") && !cmd.equals("watch") && !cmd.equals("update_check") && !cmd.equals("logs") && !cmd.equals("app_info")
-                && !cmd.equals("wake") && !cmd.equals("global")) keepAwake();
+                && !cmd.equals("wake") && !cmd.equals("global") && !cmd.equals("media_since") && !cmd.equals("media_upload")) keepAwake();
         switch (cmd) {
             case "state": return state();
             case "wake": return wake();
@@ -80,6 +80,9 @@ final class Commands {
             case "update_check": return updateCheck();
             case "app_info": return appInfo(a.getString("pkg"));
             case "logs": { JSONObject o = new JSONObject(); o.put("text", WLog.text()); return o; }
+            case "share": return Media.share(svc, a.getString("pkg"), a.getJSONArray("files"), this::foreground);
+            case "media_since": return Media.since(svc, a.getLong("since_ms"), a.optString("pkg", null), a.optJSONArray("mimes"));
+            case "media_upload": return Media.upload(svc, a.getLong("id"));
             default: throw new IllegalArgumentException("모르는 명령 " + cmd);
         }
     }

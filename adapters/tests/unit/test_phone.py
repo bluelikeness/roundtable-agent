@@ -543,6 +543,33 @@ async def test_apk_distribution(tmp_path):
             path2 = (await c.post("/apk/link", headers={"X-Hub-Token": HUB})).json()["path"]
             gw._once = {k: 0.0 for k in gw._once}
             assert (await c.get(path2)).status_code == 404
+            # 원탁 앱(?app=client): 파일이 있어야 발급되고, 같은 일회용 경로로 원탁 APK 를 준다
+            assert (await c.post("/apk/link?app=client", headers={"X-Hub-Token": HUB})).status_code == 404
+            (dist / "roundtable.apk").write_bytes(b"CLIENTAPK")
+            path3 = (await c.post("/apk/link?app=client", headers={"X-Hub-Token": HUB})).json()["path"]
+            r = await c.get(path3)
+            assert r.content == b"CLIENTAPK" and "roundtable.apk" in r.headers["content-disposition"]
+            # 워커 링크는 여전히 워커
+            path4 = (await c.post("/apk/link", headers={"X-Hub-Token": HUB})).json()["path"]
+            assert (await c.get(path4)).content == b"APKDATA"
+            # 첨부 중계: 어댑터가 맡기면(허브 토큰) 휴대폰이 받고(기기 토큰), 휴대폰이 올리면 어댑터가 받는다
+            hub = {"X-Hub-Token": HUB}
+            r = await c.post("/files", content=b"IMG", headers={**hub, "Content-Type": "image/png", "X-File-Name": "a%20b.png"})
+            up = r.json()
+            assert r.status_code == 200 and up["name"] == "a b.png" and up["size"] == 3
+            assert (await c.get(f"/phone/files/{up['code']}")).status_code == 401
+            assert (await c.get(f"/phone/files/{up['code']}", headers={"X-Hub-Token": HUB})).status_code == 401
+            got = await c.get(f"/phone/files/{up['code']}", headers=dev)
+            assert got.content == b"IMG" and got.headers["content-type"] == "image/png"
+            assert (await c.post("/files", content=b"", headers=hub)).status_code == 400
+            assert (await c.post("/phone/files", content=b"VID")).status_code == 401
+            back = (await c.post("/phone/files", content=b"VID", headers={**dev, "Content-Type": "video/mp4"})).json()
+            assert (await c.get(f"/files/{back['code']}")).status_code == 401
+            assert (await c.get(f"/files/{back['code']}", headers=hub)).content == b"VID"
+            gw.FILE_MAX_BYTES = 2
+            assert (await c.post("/files", content=b"TOO", headers=hub)).status_code == 413
+            gw._files = {k: (v[0], v[1], v[2], 0.0) for k, v in gw._files.items()}  # 만료
+            assert (await c.get(f"/files/{back['code']}", headers=hub)).status_code == 404
     finally:
         server.should_exit = True
         await task

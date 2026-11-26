@@ -16,7 +16,9 @@ import base64
 import contextlib
 import logging
 import os
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -265,6 +267,50 @@ class PhoneDevice:
 
     async def login_completed(self) -> None:
         return None  # 로그인은 사람이 휴대폰에서 직접 한다
+
+    # --- 첨부(게이트웨이 파일 중계) -------------------------------------------
+
+    async def stage_file(self, path: Path, name: str, mime: str) -> str:
+        """휴대폰에 줄 파일을 게이트웨이에 맡긴다 → 코드(휴대폰이 /phone/files/<code> 로 받는다)."""
+
+        async def body():
+            with path.open("rb") as f:
+                while chunk := f.read(256 * 1024):
+                    yield chunk
+
+        r = await self._req(
+            "POST", "/files", content=body(), headers={"Content-Type": mime, "X-File-Name": quote(name, safe="")}, timeout=300
+        )
+        if r.status_code != 200:
+            raise PhoneCommandFailed(f"파일 맡기기: {_error(r)}")
+        return str(r.json()["code"])
+
+    async def share(self, pkg: str, files: list[dict[str, str]]) -> dict:
+        """맡긴 파일들(code·name·mime)을 공유하기로 pkg 앱에 넘긴다(화면을 쓴다). 파일 받는 시간까지 넉넉히 기다린다."""
+        return await self._screen("share", {"pkg": pkg, "files": files}, timeout_s=180)
+
+    async def media_since(self, since_ms: int, pkg: str | None = None, mimes: list[str] | None = None) -> dict:
+        """since_ms 뒤 휴대폰에 저장된 사진·영상({items, access}). pkg 면 그 앱이 저장한 것만."""
+        args: dict[str, Any] = {"since_ms": int(since_ms)}
+        if pkg:
+            args["pkg"] = pkg
+        if mimes:
+            args["mimes"] = list(mimes)
+        return await self._rpc("media_since", args, timeout_s=20)
+
+    async def media_fetch(self, media_id: int, dest: Path) -> dict:
+        """휴대폰의 저장 파일 하나를 게이트웨이로 올리게 한 뒤 dest 로 받는다 → {name, mime, size}."""
+        up = await self._rpc("media_upload", {"id": int(media_id)}, timeout_s=300)
+        try:
+            async with self._http().stream("GET", f"/files/{up['code']}", timeout=300) as r:
+                if r.status_code != 200:
+                    raise PhoneCommandFailed(f"저장 파일 받기: HTTP {r.status_code}")
+                with dest.open("wb") as f:
+                    async for chunk in r.aiter_bytes():
+                        f.write(chunk)
+        except httpx.HTTPError as e:
+            raise BackendDown(f"폰 게이트웨이에서 파일을 받지 못함: {e}") from e
+        return {"name": up.get("name") or dest.name, "mime": up.get("mime") or "application/octet-stream", "size": up.get("size")}
 
     # --- 알림 -------------------------------------------------------------
 

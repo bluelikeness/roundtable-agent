@@ -10,7 +10,9 @@
   POST /lease/{id}/renew, DELETE /lease/{id}
   POST /lease/{id}/yield        {to: send|any} 보내려고(any: 누구든) 기다리는 봇이 있으면 임대를 돌려준다 → {released}
   GET  /events?after=&pkg=&wait_s=&device=   알림 이벤트 롱폴링
-  POST /apk/link                한 번만 쓰는 APK 다운로드 경로를 만든다(QR 설치용, 30분)
+  POST /apk/link[?app=client]   한 번만 쓰는 APK 다운로드 경로를 만든다(QR 설치용, 30분). app=client 면 원탁 앱
+  POST /files                   어댑터 → 휴대폰으로 줄 파일을 잠깐 맡긴다(X-File-Name, Content-Type) → {code}
+  GET  /files/{code}            휴대폰이 올린 파일을 어댑터가 받는다
   GET  /devices                 붙은 적 있는 휴대폰 목록과 기본 휴대폰(허브 봇 상태 패널 "사용할 폰")
   PUT  /prefer                  {device} 기본 휴대폰을 바꾼다. "" 면 먼저 붙은 폰
 
@@ -23,6 +25,10 @@ device 는 휴대폰 이름의 일부(예: "SM-X910", "3f9a1c") 또는 기기 ID
   GET  /phone/apk/latest.json   최신 버전 정보. 기기 토큰(Bearer)
   GET  /phone/apk/download      최신 APK. 기기 토큰(Bearer). 워커 자동 업데이트가 쓴다
   GET  /phone/apk/once/{code}   한 번만 쓰는 다운로드(브라우저 설치용). APK 안에 기기 토큰이 있어 공개 링크를 두지 않는다
+
+  첨부 파일 중계(2026-11-27, 공개 경로, 기기 토큰). 파일은 FILE_TTL_S 동안만 게이트웨이 임시 폴더에 있다
+  GET  /phone/files/{code}      어댑터가 맡긴 파일을 휴대폰이 받는다(공유하기로 봇 앱에 넣기)
+  POST /phone/files             휴대폰이 파일을 올린다(봇 앱이 저장한 결과) → {code}
 
 내부 API 는 어댑터와 같은 X-Hub-Token 을 요구한다. 기기 토큰과 허브 토큰은 다르다.
 같은 휴대폰(같은 기기 이름)의 새 연결은 이전 연결을 끊고 대신한다(재연결 중 끊긴 소켓이 남는 경우).
@@ -38,6 +44,8 @@ import json
 import logging
 import os
 import secrets
+import shutil
+import tempfile
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -258,6 +266,7 @@ class Phone:
 
 class Gateway:
     APK_NAME = "roundtable-worker.apk"
+    CLIENT_APK = "roundtable.apk"  # 원탁 앱(웹 화면을 감싼 클라이언트). 토큰이 없어 자동 업데이트 대상이 아니다
     ONCE_TTL_S = 30 * 60
     ONCE_GRACE_S = 120  # 첫 다운로드 뒤 다시 받을 수 있는 시간(다운로드 관리자의 재요청용)
 
@@ -273,7 +282,11 @@ class Gateway:
         if not device_token:
             raise ValueError("기기 토큰 없이 기동하지 않습니다(PHONE_DEVICE_TOKEN)")
         self.apk_dir = Path(apk_dir) if apk_dir else None
+        # 첨부 중계: 코드 → (경로, 이름, 종류, 만료). 프로세스가 끝나면 사라지는 임시 폴더
+        self._files: dict[str, tuple[Path, str, str, float]] = {}
+        self._files_dir: Path | None = None
         self._once: dict[str, float] = {}  # 한 번만 쓰는 다운로드 코드 → 만료 시각
+        self._once_name: dict[str, str] = {}  # 코드 → 내려줄 APK 이름(원탁 앱일 때만)
         self.hub_token = hub_token
         self.device_token = device_token.encode()
         self.watch_pkgs = watch_pkgs
@@ -656,24 +669,105 @@ class Gateway:
         # 안드로이드 브라우저는 첫 응답을 보고 다운로드 관리자가 같은 주소를 한 번 더 부른다.
         # 그래서 첫 사용 뒤 잠깐(ONCE_GRACE_S)만 더 살려 두고 사라지게 한다
         self._once[code] = min(exp, now + self.ONCE_GRACE_S)
+        if self._once_name.get(code) == self.CLIENT_APK:
+            return self._apk_file(self.CLIENT_APK)
         return self._apk_file()
 
-    def _apk_file(self) -> Response:
-        if self._latest() is None:
+    def _apk_file(self, name: str | None = None) -> Response:
+        if name is None:
+            if self._latest() is None:
+                return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
+            name = self.APK_NAME
+        elif self.apk_dir is None or not (self.apk_dir / name).is_file():
             return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
         return FileResponse(
-            self.apk_dir / self.APK_NAME,
+            self.apk_dir / name,
             media_type="application/vnd.android.package-archive",
-            filename=self.APK_NAME,
+            filename=name,
             headers={"Cache-Control": "no-store"},
         )
 
     async def apk_link(self, request: Request) -> JSONResponse:
-        if self._latest() is None:
+        """일회용 다운로드 경로. ?app=client 면 원탁 앱, 아니면 워커."""
+        client = request.query_params.get("app") == "client"
+        if client:
+            if self.apk_dir is None or not (self.apk_dir / self.CLIENT_APK).is_file():
+                return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
+        elif self._latest() is None:
             return JSONResponse({"error": "배포된 APK 없음"}, status_code=404)
         code = secrets.token_urlsafe(24)
-        self._once[code] = time.monotonic() + self.ONCE_TTL_S
+        now = time.monotonic()
+        self._once[code] = now + self.ONCE_TTL_S
+        self._once_name = {k: v for k, v in self._once_name.items() if self._once.get(k, 0) > now}
+        if client:
+            self._once_name[code] = self.CLIENT_APK
+            return JSONResponse({"path": f"/phone/apk/once/{code}", "expires_in_s": self.ONCE_TTL_S})
         return JSONResponse({"path": f"/phone/apk/once/{code}", "expires_in_s": self.ONCE_TTL_S, "latest": self._latest()})
+
+    # --- 첨부 파일 중계 -----------------------------------------------------
+
+    FILE_TTL_S = 15 * 60
+    FILE_MAX_BYTES = 100 * 1024 * 1024
+
+    def _purge_files(self) -> None:
+        now = time.monotonic()
+        for code, (path, _n, _m, exp) in list(self._files.items()):
+            if exp <= now:
+                self._files.pop(code, None)
+                with contextlib.suppress(OSError):
+                    path.unlink()
+
+    async def _put_file(self, request: Request) -> JSONResponse:
+        """본문을 임시 파일로 받는다. 이름은 X-File-Name(URL 인코딩), 종류는 Content-Type."""
+        from urllib.parse import unquote
+
+        self._purge_files()
+        if self._files_dir is None:
+            self._files_dir = Path(tempfile.mkdtemp(prefix="phone-files-"))
+        name = unquote(request.headers.get("x-file-name", "")).strip().replace("/", "_").replace("\\", "_")[:200] or "file"
+        mime = (request.headers.get("content-type") or "application/octet-stream").split(";")[0].strip()
+        code = secrets.token_urlsafe(18)
+        path = self._files_dir / code
+        size = 0
+        try:
+            with path.open("wb") as f:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > self.FILE_MAX_BYTES:
+                        raise ValueError("too_large")
+                    f.write(chunk)
+        except ValueError:
+            path.unlink(missing_ok=True)
+            return JSONResponse({"error": "파일이 너무 큼"}, status_code=413)
+        if size == 0:
+            path.unlink(missing_ok=True)
+            return JSONResponse({"error": "빈 파일"}, status_code=400)
+        self._files[code] = (path, name, mime, time.monotonic() + self.FILE_TTL_S)
+        return JSONResponse({"code": code, "name": name, "mime": mime, "size": size})
+
+    def _get_file(self, code: str) -> Response:
+        self._purge_files()
+        got = self._files.get(code)
+        if got is None:
+            return JSONResponse({"error": "없거나 만료된 파일"}, status_code=404)
+        path, name, mime, _ = got
+        return FileResponse(path, media_type=mime, filename=name, headers={"Cache-Control": "no-store"})
+
+    async def files_put(self, request: Request) -> JSONResponse:
+        return await self._put_file(request)
+
+    async def files_get(self, request: Request) -> Response:
+        return self._get_file(request.path_params["code"])
+
+    async def phone_files_get(self, request: Request) -> Response:
+        if not self._device_ok(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return self._get_file(request.path_params["code"])
+
+    async def phone_files_put(self, request: Request) -> JSONResponse:
+        if not self._device_ok(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await self._put_file(request)
 
     # --- 조립 -------------------------------------------------------------
 
@@ -685,12 +779,16 @@ class Gateway:
                 yield
             finally:
                 self._reaper.cancel()
+                if self._files_dir is not None:
+                    shutil.rmtree(self._files_dir, ignore_errors=True)
 
         public = Starlette(
             routes=[
                 Route("/phone/apk/latest.json", self.apk_latest),
                 Route("/phone/apk/download", self.apk_download),
                 Route("/phone/apk/once/{code}", self.apk_once),
+                Route("/phone/files", self.phone_files_put, methods=["POST"]),
+                Route("/phone/files/{code}", self.phone_files_get),
             ]
         )
         inner = Starlette(
@@ -704,17 +802,20 @@ class Gateway:
                 Route("/lease/{lease}/yield", self.lease_yield, methods=["POST"]),
                 Route("/lease/{lease}", self.lease_release, methods=["DELETE"]),
                 Route("/events", self.events_poll),
+                Route("/files", self.files_put, methods=["POST"]),
+                Route("/files/{code}", self.files_get),
                 Route("/devices", self.devices),
                 Route("/prefer", self.set_prefer, methods=["PUT"]),
             ],
             lifespan=lifespan,
         )
         # HubTokenGuard 는 http 만 검사한다. 휴대폰 WebSocket 은 위에서 기기 토큰으로 따로 검사한다.
-        # /phone/apk/ 는 휴대폰·브라우저가 쓰는 공개 경로라 허브 토큰 대신 기기 토큰·일회용 코드로 검사한다
+        # /phone/apk/·/phone/files 는 휴대폰·브라우저가 쓰는 공개 경로라 허브 토큰 대신 기기 토큰·일회용 코드로 검사한다
         guarded = HubTokenGuard(inner, self.hub_token)
 
         async def dispatch(scope, receive, send):
-            if scope["type"] == "http" and scope.get("path", "").startswith("/phone/apk/"):
+            path = scope.get("path", "")
+            if scope["type"] == "http" and (path == "/phone/files" or path.startswith(("/phone/apk/", "/phone/files/"))):
                 await public(scope, receive, send)
             else:
                 await guarded(scope, receive, send)

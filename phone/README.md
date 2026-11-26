@@ -95,3 +95,31 @@ Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when re
 
 Designed for a personal phone. If the screen is off or locked, the adapter reports `backend_down` and does
 not operate the phone.
+
+## Attachments (photos and videos in and out)
+
+Used by the Pickle and Muse adapters (docs/03-adapters.md ch. 2). Files only pass through the phone gateway's temporary
+relay (15 minutes) and are not kept on the worker.
+
+- **In**: the `share` command downloads the files (`GET /phone/files/<code>`, device token) and opens the assistant app
+  through Android's Share. The adapter then sends the text.
+- **Out**: `media_since` finds photos and videos the assistant app saved during the question, `media_upload` uploads
+  them to the gateway (`POST /phone/files`). Opening the worker screen asks for **photos and videos** access; allow it
+  (the worker screen shows "사진·영상 읽기: 허용됨").
+- Results the app only shows in its chat without saving them to the phone can't be collected yet.
+
+## Roundtable app (phone/client)
+
+An Android app (`dev.roundtable.app`, named "원탁") that wraps the Roundtable web UI. It is separate from the worker
+that drives the bots and contains no tokens.
+
+```bash
+phone/client/release.sh   # opens https://<PUBLIC_HOST>/ from .env
+```
+
+- Output: `phone/dist/roundtable.apk`. A one-time 30-minute link comes from `phone-gateway`'s
+  `POST /apk/link?app=client`, rendered as a QR code (`phone/dist/roundtable-qr.png`).
+- Sign-in is the same as the web (password + code); cookies stay in the app.
+- 📎 uses the Android file picker (multiple files); downloads go through the download manager with the sign-in
+  cookie. Links outside Roundtable open in the browser.
+- No auto-update. Reinstall from a new QR to upgrade (same debug signature).
