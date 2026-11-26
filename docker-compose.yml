@@ -51,6 +51,9 @@ services:
       HUB_PHONE_GATEWAY_URL: http://phone-gateway:9200
     secrets:
       - hub_adapter_token
+    volumes:
+      # 파일 보관함(첨부·봇이 만든 파일). 보관 기간이 지나면 허브가 지운다
+      - hub-files:/data/files
     depends_on:
       postgres:
         condition: service_healthy
@@ -225,6 +228,7 @@ secrets:
 
 volumes:
   pgdata:
+  hub-files:
   runner-claude:
   mock-a-data:
   mock-b-data:

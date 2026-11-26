@@ -123,7 +123,7 @@ describe("입력창", () => {
     await act(async () => {
       fireEvent.keyDown(ta, { key: "Enter" });
     });
-    expect(onSubmit).toHaveBeenCalledWith("@mock-a 강남 한식");
+    expect(onSubmit).toHaveBeenCalledWith("@mock-a 강남 한식", []);
     expect(ta.value).toBe("");
   });
 

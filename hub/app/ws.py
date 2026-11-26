@@ -109,7 +109,7 @@ async def _dispatch(manager: RunManager, conn: Connection, op: tuple[int, int], 
                 if not await manager.subscribe(conn, sid, since_seq=_NO_REPLAY):
                     return
             try:
-                await manager.send(sid, msg.payload.text, msg.payload.model)
+                await manager.send(sid, msg.payload.text, msg.payload.model, msg.payload.attachments)
             except SendError as e:
                 log.info("send 거절: %s", e.code)
         case CancelQueued():

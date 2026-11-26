@@ -19,6 +19,8 @@ if not TEST_DB_URL.rstrip("/").endswith("_test"):
 os.environ["HUB_DATABASE_URL"] = TEST_DB_URL
 os.environ["HUB_SECRET_KEY"] = "test-secret-key-0123456789abcdefghijklmnop"
 os.environ["HUB_COOKIE_SECURE"] = "false"
+# 파일 보관함은 임시 폴더에
+os.environ["HUB_FILES_DIR"] = str(Path(__import__("tempfile").mkdtemp(prefix="hub-files-")))
 
 import httpx  # noqa: E402
 import pyotp  # noqa: E402
@@ -35,7 +37,7 @@ from app.models import Operator  # noqa: E402
 HUB_DIR = Path(__file__).resolve().parents[1]
 USERNAME = "operator"
 PASSWORD = "correct horse battery staple"
-TABLES = "room_message, participant, room, tool_call, run, message, bot_thread, session, session_group, bot, operator"
+TABLES = "hub_file, room_message, participant, room, tool_call, run, message, bot_thread, session, session_group, bot, operator"
 
 
 @pytest.fixture(scope="session", autouse=True)

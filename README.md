@@ -41,7 +41,10 @@ Write in a **room** on the web page as you would to a person. Claude decides whi
 | "Pickle argues for remote work, Muse against — debate" | Claude **moderates**: each side rebuts the other |
 | "Hold a meeting and settle on one team-dinner venue" | Collects views, pits only the disagreements against each other, reaches a **decision** |
 | "Word-chain game, 5 rounds, everyone" | Runs the **game** and enforces the rules |
+| Attach a photo with 📎: "make a video from this and pass it on to another assistant" | Hands the file to an assistant and **relays** the file it makes to the next one (assistants that accept files only) |
 | On your phone, tell Pickle "send this to the roundtable room" | An outside assistant **posts into a room** and gets the answer back |
+
+Up to 5 files per message, 100 MB each, kept on the server for 30 days. Today only the mock assistant accepts files; the phone assistants (Pickle, Muse) come in a later step.
 
 Anything that costs money — payments, booking confirmations — is **always asked first.** The summary ends with
 "Shall I proceed?" and a [Proceed] button; nothing is confirmed until you press it.

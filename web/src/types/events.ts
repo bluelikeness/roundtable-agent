@@ -246,6 +246,7 @@ export interface Send {
 export interface SendPayload {
   text: string;
   model?: ("sonnet" | "opus") | null;
+  attachments?: string[];
 }
 /**
  * This interface was referenced by `EventsSchema`'s JSON-Schema

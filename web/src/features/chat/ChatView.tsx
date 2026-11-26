@@ -13,14 +13,16 @@ import {
   useStore,
 } from "../../store";
 import type { ReactNode } from "react";
+import type { FileRef } from "../../api/types";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { RunHeader } from "./RunHeader";
 
 /** 슬래시 명령을 처리하거나 Claude 에 보낸다. 성공하면 true(입력창을 비운다) */
-async function submit(text: string, sid: string | null): Promise<boolean> {
-  const cmd = parseCommand(text);
-  if (!cmd) return sendText(text);
+async function submit(text: string, sid: string | null, files: FileRef[] = []): Promise<boolean> {
+  // 파일을 붙였으면 명령이 아니라 보내는 글이다
+  const cmd = files.length ? null : parseCommand(text);
+  if (!cmd) return sendText(text, files);
   const chat = sid ? useStore.getState().chats[sid] : undefined;
   switch (cmd.cmd) {
     case "new":
@@ -100,7 +102,7 @@ export function ChatView({ leading, trailing }: ChatViewProps) {
             {notice.text}
           </div>
         )}
-        <Composer bots={bots} onSubmit={(t) => submit(t, activeId)} />
+        <Composer bots={bots} onSubmit={(t, f) => submit(t, activeId, f)} />
       </div>
     </section>
   );

@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # 한 방의 참가자 상한(사람+AI, 운영자 제외)과 초대 링크로 들어오는 분당 입장 수
     room_max_participants: int = 20
     room_joins_per_minute: int = 5
+    # 파일 보관함(첨부·봇이 만든 파일). 본문을 두는 폴더, 한 파일 상한(MB), 보관 일수(0 이면 지우지 않음).
+    # 상한은 앞단(Cloudflare 터널 무료 100MB, web nginx client_max_body_size)보다 크지 않게 둔다
+    files_dir: str = "/data/files"
+    file_max_mb: int = 100
+    file_retention_days: int = 30
     # 바깥에서 보이는 허브 주소(https://...). 링크 전용 안내 페이지의 주소를 만들 때 쓴다. 비면 요청 주소
     public_url: str = ""
 

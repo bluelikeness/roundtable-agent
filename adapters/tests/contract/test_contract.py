@@ -254,6 +254,42 @@ async def test_restart_restores_threads(target: Target):
     assert (await thread_info(target, thread))["message_count"] > count_before
 
 
+async def _sink_file(data: bytes, name: str, mime: str) -> str:
+    """기록용 가짜 허브(webhook-sink)에 첨부를 올리고 ID 를 돌려준다."""
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(
+            f"{SINK_URL}/internal/files",
+            content=data,
+            headers={"X-Hub-Token": TOKEN, "Content-Type": mime, "X-File-Name": name},
+        )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_attachments(target: Target):
+    """첨부(03 2장): 받는 봇은 받은 파일을 쓰고 만든 파일을 structured.files 로, 못 받는 봇은 error=unsupported."""
+    fid = await _sink_file(b"\x89PNG fake image", "cat.png", "image/png")
+    text = target.driver.file_text()
+    if text is None:
+        r = await ask(target, target.driver.normal_text("이 사진 봐 줘"), tid("att"), attachments=[fid])
+        assert r["ok"] is False and r["error"] == "unsupported"
+        return
+    r = await ask(target, text, tid("att"), attachments=[fid])
+    assert r["ok"] is True, r
+    assert "cat.png" in r["raw"]  # 봇이 첨부를 받았다
+    files = r["structured"]["files"]
+    assert len(files) == 1 and files[0]["mime"] == "image/png" and files[0]["id"] != fid
+    async with httpx.AsyncClient(timeout=10) as c:
+        stored = {f["id"]: f for f in (await c.get(f"{SINK_URL}/files")).json()}
+    assert stored[files[0]["id"]]["bot"] == target.name
+    # 받은 파일을 다른 봇에게 넘기듯 그대로 다시 첨부할 수 있다
+    r2 = await ask(target, target.driver.normal_text("이것도"), tid("att"), attachments=[files[0]["id"]])
+    assert r2["ok"] is True and files[0]["name"] in r2["raw"]
+    # 없는 첨부는 예외가 아니라 error 필드
+    r3 = await ask(target, target.driver.normal_text("없는 파일"), tid("att"), attachments=["f_" + "0" * 22])
+    assert r3["ok"] is False and r3["error"] == "internal"
+
+
 async def test_call_never_raises_on_bad_input(target: Target):
     """스키마를 어긴 입력도 MCP 예외가 아니라 AskResult(error=internal)."""
     for args in (
@@ -261,6 +297,8 @@ async def test_call_never_raises_on_bad_input(target: Target):
         {"text": "hi", "thread_id": tid("bad"), "timeout_s": 5},
         {"text": "", "thread_id": tid("bad")},
         {"text": "hi"},
+        {"text": "hi", "thread_id": tid("bad"), "attachments": "f_not-a-list"},
+        {"text": "hi", "thread_id": tid("bad"), "attachments": ["../etc/passwd"]},
     ):
         r = await call(target, "ask", args)
         assert r["ok"] is False and r["error"] == "internal", args

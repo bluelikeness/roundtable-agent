@@ -124,11 +124,19 @@ export interface StructuredImage {
   url: string;
   alt?: string | null;
 }
+/** 허브 파일 보관함의 파일(첨부·봇이 만든 파일). 보기는 /api/files/<id> */
+export interface FileRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
 export interface Structured {
   buttons?: StructuredButton[];
   links?: StructuredLink[];
   cards?: StructuredCard[];
   images?: StructuredImage[];
+  files?: FileRef[];
   choices?: string[];
   confirmation_required?: { summary: string; action_id?: string | null } | null;
 }

@@ -29,7 +29,10 @@
       "text":       {"type": "string", "maxLength": 4000},
       "thread_id":  {"type": "string", "description": "허브 세션 ID. 같은 ID면 같은 봇 대화를 잇는다"},
       "timeout_s":  {"type": "integer", "default": 120, "minimum": 10, "maximum": 240},
-      "reset":      {"type": "boolean", "default": false, "description": "true면 봇 대화를 새로 시작한 뒤 보낸다"}
+      "reset":      {"type": "boolean", "default": false, "description": "true면 봇 대화를 새로 시작한 뒤 보낸다"},
+      "attachments": {"type": "array", "maxItems": 5,
+                      "items": {"type": "string", "pattern": "^f_[A-Za-z0-9_-]{16,64}$"},
+                      "description": "허브 파일 ID. 사용자 글의 [첨부 파일] 목록이나 다른 봇 답의 structured.files[].id"}
     }
   }
 }
@@ -44,7 +47,7 @@
 | `raw` | string | 봇 원문. 여러 메시지면 `\n\n`으로 이어 붙임. ok=false면 빈 문자열 |
 | `structured` | object | 3장 스키마. 없으면 `{}` |
 | `needs_input` | bool | 봇이 되물었다고 판단되면 true (물음표로 끝나거나 선택지 버튼이 있을 때) |
-| `error` | string \| null | `timeout` · `unavailable` · `login_required` · `rate_limited` · `internal` |
+| `error` | string \| null | `timeout` · `unavailable` · `login_required` · `rate_limited` · `internal` · `unsupported`(받지 못하는 첨부) |
 | `latency_ms` | int | 전송부터 응답 확정까지 |
 | `message_ids` | string\[\] | 어댑터 내부 메시지 식별자. 디버깅용 |
 
@@ -66,6 +69,15 @@
 - `thread_id`당 봇 대화 하나. 어댑터가 처음 보는 `thread_id`면 새 봇 대화를 만든다.
 - 같은 어댑터에 동시 `ask`가 오면 큐에서 순서대로 처리한다. Claude Code가 병렬로 불러도 어댑터 안에서는 직렬이다.
 - MCP 레벨 예외를 던지지 않는다. 던지면 Claude Code 실행이 통째로 실패한다.
+- 두 툴 모두 `readOnlyHint: true` 힌트를 단다. 없으면 Claude Code 가 여러 봇의 `ask` 를 한 번에 하나씩 실행한다(2026-11-26).
+
+**첨부** (2026-11-26 추가, 승인된 계약 확장)
+
+- 파일은 허브 파일 보관함(`hub/app/files.py`)에 두고 ID(`f_…`)로만 주고받는다. 사용자가 웹에서 붙인 파일은 허브가 러너에 넘기는 글 끝에 `[첨부 파일]` 목록(ID·이름·종류·크기)으로 붙는다.
+- `ask` 의 `attachments` 에 ID 를 넣으면 어댑터가 허브 `GET /internal/files/<id>`(X-Hub-Token)로 받아 `_attach` 훅에 넘기고, 이어서 `text` 를 보낸다. 재시도 때는 글만 다시 보낸다.
+- 첨부를 받는 봇은 `accepts_files`(MIME 앞부분, 예: `image/`)를 채운다. 비어 있는 봇에 첨부를 넣거나 받지 않는 종류면 `ok=false, error=unsupported`. `ask` 툴 설명 끝에 받는 종류(또는 받지 않음)를 베이스가 붙인다.
+- 봇이 만든 파일은 어댑터가 허브 `POST /internal/files`(X-Hub-Token, X-Bot, X-File-Name)로 올리고 `structured.files[]` 로 돌려준다. Claude 는 그 ID 를 다음 봇의 `attachments` 로 넘겨 릴레이한다.
+- 2026-11-26 현재 첨부를 받는 어댑터는 Mock 뿐이다. 휴대폰 봇(피클·뮤즈)은 공유하기로 넣기·저장 파일 집기 작업 뒤에 연다.
 
 ## 3. structured 응답 스키마
 
@@ -77,6 +89,7 @@
   "links":   [{"title": "네이버 예약", "url": "https://..."}],
   "cards":   [{"title": "OO식당", "subtitle": "강남 · 한식", "body": "18:30 2명 가능", "url": "https://...", "image_url": "https://..."}],
   "images":  [{"url": "https://...", "alt": "메뉴 사진"}],
+  "files":   [{"id": "f_…", "name": "clip.mp4", "mime": "video/mp4", "size": 1048576}],
   "choices": ["18:00", "18:30", "19:00"],
   "confirmation_required": {"summary": "KTX 서울→부산 11/12 07:00 결제 58,800원", "action_id": "btn_pay"}
 }
@@ -88,6 +101,7 @@
 | `links` | 메시지 안 URL | 본문에서 추출 |
 | `cards` | 앱의 리스트 아이템, 웹 응답의 카드 요소 | 식당·상품·항공권 같은 선택지 |
 | `images` | 이미지 첨부 | URL은 어댑터가 자기 스토리지에 복사한 로컬 경로. 외부 URL 그대로 노출 안 함 |
+| `files` | 봇이 만든 파일(영상·문서 등) | 허브 파일 보관함에 올린 뒤의 ID. 다른 봇의 `attachments` 로 그대로 넘긴다. `images`(말풍선 캡처)와 달리 원본 파일 |
 | `choices` | 되물음의 선택지 (버튼이 아닌 텍스트 나열) | `needs_input=true`와 함께 |
 | `confirmation_required` | 결제·예약 확정 단계 | UI가 눈에 띄게 표시. Claude Code는 이 단계를 절대 자동으로 넘기지 않고 사용자에게 묻는다 |
 
@@ -147,6 +161,7 @@ class BotAdapter(ABC):
     progress_patterns: list[str] = []   # 무시할 진행 메시지 정규식
     question_patterns: list[str] = []   # needs_input 힌트 정규식
     min_interval_s: float = 1.0     # 연속 전송 최소 간격
+    accepts_files: tuple[str, ...] = ()  # 받는 첨부 MIME 앞부분. 비면 첨부는 error=unsupported
 
     # --- 봇별 구현 훅 ---
     async def _ensure_ready(self) -> None: ...            # 로그인 상태 확인, 아니면 LoginRequired 발생
@@ -154,9 +169,11 @@ class BotAdapter(ABC):
     async def _collect(self, thread: Thread, deadline: float) -> list[RawMessage]: ...
     async def _extract(self, msgs: list[RawMessage]) -> tuple[str, Structured]: ...
     async def _login_flow(self) -> LoginFlow: ...        # CodeLogin | VncLogin
+    async def _attach(self, thread: Thread, files: list[Attachment]) -> None: ...  # 선택: 첨부를 봇 대화에 넣기
 
     # --- 베이스가 제공 ---
-    async def ask(self, text, thread_id, timeout_s=120, reset=False) -> AskResult
+    async def ask(self, text, thread_id, timeout_s=120, reset=False, attachments=None) -> AskResult
+    async def publish_file(self, data: bytes | Path, name: str, mime: str) -> FileRef  # 봇이 만든 파일 → 허브
     async def status(self) -> Status
     async def reset(self, thread_id: str | None) -> None
     def serve(self) -> None            # MCP(9000) + 관리 HTTP(9100) 동시 기동
@@ -179,6 +196,7 @@ progress_patterns: ["^찾는 중", "^잠시만", "^확인하고 있"]
 question_patterns: ["몇 명", "언제", "어디", "\\?$"]
 health: {probe_interval_s: 300}
 hub_webhook: http://hub-api:8000/internal/bot-status
+# hub_files: http://hub-api:8000/internal/files   # 비면 hub_webhook 주소에서 만든다(env HUB_FILES_URL)
 ```
 
 `description`은 그대로 MCP 툴 description이 된다. 봇의 강점·약점·응답 시간·언어·확정 정책을 적어야 Claude Code가 봇을 고를 수 있다.
