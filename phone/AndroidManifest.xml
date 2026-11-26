@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 안드로이드 11+: 봇 앱이 내려받은 문서(PDF 등)까지 읽으려면 "모든 파일 접근"을 사용자가 설정에서 켠다 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <!-- 런처 인텐트로 봇 앱을 열기 위해 런처 앱 목록을 본다 -->
     <queries>
@@ -45,6 +48,7 @@
         android:label="Roundtable-Agent 워커"
         android:icon="@android:drawable/ic_menu_share"
         android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="true">
 
         <activity

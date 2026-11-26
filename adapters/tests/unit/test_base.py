@@ -224,3 +224,16 @@ async def test_scripted_confirm_and_tap(tmp_path):
     assert r.structured["confirmation_required"] == {"summary": "한옥집 19:00 2명 20,000원", "action_id": "btn_confirm_1"}
     r = await a.ask("[tap:btn_confirm_1]", "t1")
     assert r.ok and r.raw == "예약 완료" and "confirmation_required" not in r.structured
+
+
+def test_ask_description_marks_any_file_type():
+    """accepts_files 에 "*" 가 있으면 모든 종류를 받는다고 적고, 앱이 받지 않으면 unsupported 라고 알린다."""
+    from types import SimpleNamespace
+
+    from adapters.mcp_server import ask_description
+
+    any_kind = ask_description(SimpleNamespace(description="봇", accepts_files=("*",)))
+    assert "모든 종류" in any_kind and "unsupported" in any_kind
+    some = ask_description(SimpleNamespace(description="봇", accepts_files=("image/", "application/pdf")))
+    assert "image/*, application/pdf" in some
+    assert "받지 않는다" in ask_description(SimpleNamespace(description="봇", accepts_files=()))

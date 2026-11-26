@@ -37,7 +37,8 @@ selectors.yaml 키 (input·input_u2·send 는 셀렉터 하나 또는 후보 목
 
 첨부(2026-11-27, config.yaml android.accepts_files·collect_files)
   넣기: 허브 파일 → 게이트웨이 중계(/files) → 워커가 받아 공유하기(ACTION_SEND)로 봇 앱에 넘긴다 → 이어서 글을 보낸다.
-  가져오기: collect_files 면 질문하는 동안 그 앱이 휴대폰에 저장한 사진·영상(MediaStore OWNER_PACKAGE_NAME)을
+  넣는 종류는 accepts_files("*" 면 모든 종류). 봇 앱의 공유하기가 그 종류를 받지 않으면 unsupported.
+  가져오기: collect_files 면 질문하는 동안 그 앱이 휴대폰에 저장한 파일(사진·영상·소리, 내려받기·문서 폴더)을
   워커가 게이트웨이로 올리고, 어댑터가 받아 허브에 올려 structured.files 로 돌려준다.
 """
 
@@ -72,6 +73,7 @@ from adapters.base import (
     VncLogin,
 )
 from adapters.learned import LearnedSelectors, app_key, device_id
+from adapters.phone.device import PhoneCommandFailed
 
 log = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://[^\s\]\)<>\"']+")
@@ -313,7 +315,13 @@ class PhoneChatAdapter(AndroidAdapter):
         ]
         async with self.screen():
             await self.ensure_device()
-            res = await self.device.share(self.android.package, staged)
+            try:
+                res = await self.device.share(self.android.package, staged)
+            except PhoneCommandFailed as e:
+                # 봇 앱의 공유하기가 그 종류를 받지 않음(워커가 미리 확인한다)
+                if "받지 않음" in str(e):
+                    raise Unsupported(f"{self.name} 앱이 이 종류의 파일을 받지 않음") from e
+                raise
             if res.get("foreground") != self.android.package:
                 raise BackendDown(f"{self.name} 앱이 공유하기로 열리지 않음")
             loop = asyncio.get_running_loop()

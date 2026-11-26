@@ -41,6 +41,20 @@ public class MainActivity extends Activity {
         col.addView(status);
         perms = new TextView(this);
         col.addView(perms);
+        // 안드로이드 11+: 봇 앱이 내려받은 문서까지 가져오려면 "모든 파일 접근"을 사람이 켠다
+        if (Build.VERSION.SDK_INT >= 30) {
+            Button files = new Button(this);
+            files.setText("모든 파일 접근 설정 열기(봇이 내려받은 문서 가져오기)");
+            files.setOnClickListener(v -> {
+                try {
+                    startActivity(new android.content.Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            android.net.Uri.parse("package:" + getPackageName())));
+                } catch (Exception e) {
+                    startActivity(new android.content.Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                }
+            });
+            col.addView(files);
+        }
 
         col.addView(section("권한 (처음 한 번)"));
         col.addView(button("앱 정보 열기 (⋮ → 제한된 설정 허용)", v -> startActivity(
@@ -95,7 +109,7 @@ public class MainActivity extends Activity {
         java.util.ArrayList<String> ask = new java.util.ArrayList<>();
         if (Build.VERSION.SDK_INT >= 33) {
             for (String p : new String[]{android.Manifest.permission.POST_NOTIFICATIONS, "android.permission.READ_MEDIA_IMAGES",
-                    "android.permission.READ_MEDIA_VIDEO"}) {
+                    "android.permission.READ_MEDIA_VIDEO", "android.permission.READ_MEDIA_AUDIO"}) {
                 if (checkSelfPermission(p) != android.content.pm.PackageManager.PERMISSION_GRANTED) ask.add(p);
             }
         } else if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -114,7 +128,8 @@ public class MainActivity extends Activity {
         boolean battery = pm.isIgnoringBatteryOptimizations(getPackageName());
         perms.setText("알림 접근: " + (notif ? "허용됨" : "필요") + "   접근성: " + (acc ? "켜짐" : "필요")
                 + "\n배터리 최적화 예외: " + (battery ? "예" : "아니오(연결이 끊길 수 있음)")
-                + "\n사진·영상 읽기: " + (Media.canRead(this) ? "허용됨" : "필요(봇이 만든 파일 가져오기)"));
+                + "\n사진·영상 읽기: " + (Media.canRead(this) ? "허용됨" : "필요(봇이 만든 파일 가져오기)")
+                + "   모든 파일 접근: " + (Media.allFiles() ? "됨" : "꺼짐(내려받은 문서는 못 가져옴)"));
     }
 
     @Override protected void onPause() {

@@ -285,6 +285,10 @@ async def test_attachments(target: Target):
     # 받은 파일을 다른 봇에게 넘기듯 그대로 다시 첨부할 수 있다
     r2 = await ask(target, target.driver.normal_text("이것도"), tid("att"), attachments=[files[0]["id"]])
     assert r2["ok"] is True and files[0]["name"] in r2["raw"]
+    # 봇이 받지 않는 종류(가짜 앱·Mock 모두 zip 은 받지 않는다)는 unsupported
+    zid = await _sink_file(b"PK fake", "a.zip", "application/zip")
+    rz = await ask(target, target.driver.normal_text("압축 파일"), tid("att"), attachments=[zid])
+    assert rz["ok"] is False and rz["error"] == "unsupported", rz
     # 없는 첨부는 예외가 아니라 error 필드
     r3 = await ask(target, target.driver.normal_text("없는 파일"), tid("att"), attachments=["f_" + "0" * 22])
     assert r3["ok"] is False and r3["error"] == "internal"

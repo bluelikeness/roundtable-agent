@@ -130,7 +130,8 @@ class FakePhone:
     async def _share(self, args: dict[str, Any]) -> dict[str, Any]:
         pkg = str(args["pkg"])
         app = self.chats.get(pkg)
-        if app is None:
+        # 가짜 채팅 앱의 공유하기는 압축 파일을 받지 않는다(실제 앱마다 받는 종류가 다르다)
+        if app is None or any(str(f.get("mime")) == "application/zip" for f in args["files"]):
             raise RuntimeError(f"이 앱은 공유하기로 이런 파일을 받지 않음: {pkg}")
         got = []
         async with httpx.AsyncClient(timeout=30, headers={"Authorization": f"Bearer {self.token}"}) as c:

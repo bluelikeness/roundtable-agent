@@ -329,9 +329,11 @@ class AndroidConfig(BaseModel):
     progress_channels: list[str] = []
     # 답 신호가 아닌 알림 채널(피클 calls: 통화 중 알림). 답 알림으로 치지 않는다
     ignore_channels: list[str] = []
-    # 첨부(휴대폰 경로, 2026-11-27). 공유하기로 받는 파일 종류(MIME 앞부분, 예: image/). 비면 첨부는 unsupported
+    # 첨부(휴대폰 경로, 2026-11-27). 공유하기로 받는 파일 종류(MIME 앞부분, 예: image/. "*" 는 모든 종류).
+    # 비면 첨부는 unsupported
     accepts_files: list[str] = []
-    # 질문하는 동안 이 앱이 휴대폰에 저장한 사진·영상을 답의 files 로 가져온다(워커에 사진·영상 읽기 권한 필요)
+    # 질문하는 동안 이 앱이 휴대폰에 저장한 파일(사진·영상·소리, 내려받기·문서 폴더)을 답의 files 로 가져온다
+    # (워커에 저장소 읽기 권한 필요)
     collect_files: bool = False
 
 
