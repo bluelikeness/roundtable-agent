@@ -311,7 +311,7 @@ class BotAdapter(ABC):
     blind_resend: bool = True
     # 받는 첨부 MIME(앞부분 일치, 예: "image/"). 비어 있으면 첨부를 받지 않는다(error=unsupported).
     # 채우는 봇은 _attach 훅을 구현한다
-    accepts_files: tuple[str, ...] = ()
+    accepts_files: tuple[str, ...] = ()  # 받는 첨부 MIME 앞부분(예: image/). "*" 는 모든 종류
 
     def __init__(self, config: AdapterConfig, state_dir: str | Path, token: str = ""):
         self.config = config
@@ -771,7 +771,7 @@ class BotAdapter(ABC):
                     if r.status_code != 200:
                         raise AdapterError(f"첨부 {fid} 받기 실패 HTTP {r.status_code}")
                     mime = r.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
-                    if not any(mime.startswith(p) for p in self.accepts_files):
+                    if not any(p == "*" or mime.startswith(p) for p in self.accepts_files):
                         raise Unsupported(f"받지 않는 첨부 종류 {mime}")
                     name = _disposition_name(r.headers.get("content-disposition", "")) or fid
                     size = 0

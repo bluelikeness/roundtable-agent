@@ -75,11 +75,11 @@
 
 - 파일은 허브 파일 보관함(`hub/app/files.py`)에 두고 ID(`f_…`)로만 주고받는다. 사용자가 웹에서 붙인 파일은 허브가 러너에 넘기는 글 끝에 `[첨부 파일]` 목록(ID·이름·종류·크기)으로 붙는다.
 - `ask` 의 `attachments` 에 ID 를 넣으면 어댑터가 허브 `GET /internal/files/<id>`(X-Hub-Token)로 받아 `_attach` 훅에 넘기고, 이어서 `text` 를 보낸다. 재시도 때는 글만 다시 보낸다.
-- 첨부를 받는 봇은 `accepts_files`(MIME 앞부분, 예: `image/`)를 채운다. 비어 있는 봇에 첨부를 넣거나 받지 않는 종류면 `ok=false, error=unsupported`. `ask` 툴 설명 끝에 받는 종류(또는 받지 않음)를 베이스가 붙인다.
+- 첨부를 받는 봇은 `accepts_files`(MIME 앞부분, 예: `image/`. `*` 는 모든 종류)를 채운다. 피클·뮤즈는 `*` 이고, 봇 앱의 공유하기가 그 종류를 받지 않으면 `unsupported`. 비어 있는 봇에 첨부를 넣거나 받지 않는 종류면 `ok=false, error=unsupported`. `ask` 툴 설명 끝에 받는 종류(또는 받지 않음)를 베이스가 붙인다.
 - 봇이 만든 파일은 어댑터가 허브 `POST /internal/files`(X-Hub-Token, X-Bot, X-File-Name)로 올리고 `structured.files[]` 로 돌려준다. Claude 는 그 ID 를 다음 봇의 `attachments` 로 넘겨 릴레이한다.
 - 2026-11-27 첨부를 받는 어댑터: Mock, 휴대폰 봇 피클·뮤즈(config.yaml `android.accepts_files`). Vooy·Cue 는 아직 받지 않는다.
 - 휴대폰 봇 넣기: 어댑터가 파일을 폰 게이트웨이에 잠깐 맡기고(`POST /files`), 워커가 기기 토큰으로 받아(`/phone/files/<code>`) 공유하기(ACTION_SEND)로 봇 앱에 넘긴 뒤 글을 보낸다. 공유 뒤 중간 화면은 selectors.yaml `share_steps` 로 넘긴다.
-- 휴대폰 봇 가져오기(`android.collect_files`): 질문하는 동안 그 앱이 휴대폰에 저장한 사진·영상(MediaStore 소유 앱)을 워커가 게이트웨이로 올리고(`POST /phone/files`) 어댑터가 받아 허브에 올린다. 앱 안에서 보이기만 하고 저장하지 않은 결과는 아직 못 가져온다.
+- 휴대폰 봇 가져오기(`android.collect_files`): 질문하는 동안 그 앱이 휴대폰에 저장한 파일(사진·영상·소리, 내려받기·문서 폴더. MediaStore 소유 앱 또는 내려받기 관리자)을 워커가 게이트웨이로 올리고(`POST /phone/files`) 어댑터가 받아 허브에 올린다. 앱 안에서 보이기만 하고 저장하지 않은 결과는 아직 못 가져온다.
 
 ## 3. structured 응답 스키마
 

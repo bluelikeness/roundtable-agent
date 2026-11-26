@@ -59,6 +59,11 @@ def _result(payload: dict[str, Any]) -> types.CallToolResult:
 
 def ask_description(adapter: "BotAdapter") -> str:
     """봇 설명 끝에 첨부를 받는지 한 줄 붙인다. Claude 가 보내기 전에 고를 수 있게."""
+    if "*" in adapter.accepts_files:
+        return (
+            f"{adapter.description}\n\n첨부(attachments): 모든 종류의 파일을 받는다(봇 앱이 그 종류를 받지 않으면 "
+            "error=unsupported). 만든 파일은 structured.files 로 돌려준다."
+        )
     if adapter.accepts_files:
         kinds = ", ".join(k + "*" if k.endswith("/") else k for k in adapter.accepts_files)
         return f"{adapter.description}\n\n첨부(attachments): {kinds} 를 받는다. 만든 파일은 structured.files 로 돌려준다."

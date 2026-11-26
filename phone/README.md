@@ -96,16 +96,19 @@ Override with `PHONE_PUBLIC_URL=https://<address> phone/release.sh` only when re
 Designed for a personal phone. If the screen is off or locked, the adapter reports `backend_down` and does
 not operate the phone.
 
-## Attachments (photos and videos in and out)
+## Attachments (files in and out)
 
 Used by the Pickle and Muse adapters (docs/03-adapters.md ch. 2). Files only pass through the phone gateway's temporary
 relay (15 minutes) and are not kept on the worker.
 
 - **In**: the `share` command downloads the files (`GET /phone/files/<code>`, device token) and opens the assistant app
-  through Android's Share. The adapter then sends the text.
-- **Out**: `media_since` finds photos and videos the assistant app saved during the question, `media_upload` uploads
+  through Android's Share. The adapter then sends the text. Any file type; if the app's Share doesn't take that
+  type, the worker notices before opening it and the adapter answers `unsupported`.
+- **Out**: `media_since` finds photos, videos, audio and files in Download/Documents that the assistant app (or the
+  download manager) saved during the question, `media_upload` uploads
   them to the gateway (`POST /phone/files`). Opening the worker screen asks for **photos and videos** access; allow it
-  (the worker screen shows "사진·영상 읽기: 허용됨").
+  (the worker screen shows "사진·영상 읽기: 허용됨"). Downloaded documents (PDF etc.): fine on Android 10 (Note9);
+  on 11+ turn on all files access with the worker screen's button.
 - Results the app only shows in its chat without saving them to the phone can't be collected yet.
 
 ## Roundtable app (phone/client)

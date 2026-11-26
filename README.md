@@ -44,9 +44,10 @@ Write in a **room** on the web page as you would to a person. Claude decides whi
 | Attach a photo with 📎: "make a video from this and pass it on to another assistant" | Hands the file to an assistant and **relays** the file it makes to the next one (assistants that accept files only) |
 | On your phone, tell Pickle "send this to the roundtable room" | An outside assistant **posts into a room** and gets the answer back |
 
-Up to 5 files per message, 100 MB each, kept on the server for 30 days. The phone assistants (Pickle, Muse) accept photos and videos: the worker puts them into the assistant app with
-Android's Share, and brings back photos and videos the app saved on the phone with the answer (allow
-"photos and videos" in the worker app). Vooy and Cue don't accept files yet.
+Up to 5 files per message, 100 MB each, kept on the server for 30 days. The phone assistants (Pickle, Muse) accept any file type (refused if the assistant app's Share doesn't take
+that type): the worker puts files into the assistant app with Android's Share, and brings back photos, videos,
+audio and downloaded files the app saved on the phone with the answer (allow "photos and videos" in the worker
+app; on Android 11+ also turn on "all files access" to bring back downloaded documents). Vooy and Cue don't accept files yet.
 
 Anything that costs money — payments, booking confirmations — is **always asked first.** The summary ends with
 "Shall I proceed?" and a [Proceed] button; nothing is confirmed until you press it.

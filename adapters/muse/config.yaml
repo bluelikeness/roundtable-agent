@@ -23,6 +23,7 @@ android:
   verify_margin_s: 0
   # 작업 중 알림. 답 신호로 치지 않고 떠 있는 동안 응답 중으로 본다
   progress_channels: [aura_run_in_background]
-  # 첨부(2026-11-27): 공유하기로 사진·영상을 넣고, 이 앱이 휴대폰에 저장한 사진·영상을 답의 files 로 가져온다
-  accepts_files: ["image/", "video/"]
+  # 첨부(2026-11-27): 공유하기로 모든 종류의 파일을 넣고(앱이 그 종류를 받지 않으면 unsupported),
+  # 이 앱이 휴대폰에 저장한 파일(사진·영상·소리, 내려받기·문서 폴더)을 답의 files 로 가져온다
+  accepts_files: ["*"]
   collect_files: true

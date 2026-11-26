@@ -130,7 +130,13 @@ final class Media {
 
     // --- 저장된 결과 찾기·올리기 ---------------------------------------------
 
+    /** 안드로이드 11+: 다른 앱이 내려받은 문서까지 읽으려면 "모든 파일 접근"(사용자가 설정에서 켠다). 10 은 옛 저장소 방식으로 된다. */
+    static boolean allFiles() {
+        return Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager();
+    }
+
     static boolean canRead(Context c) {
+        if (Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()) return true;
         if (Build.VERSION.SDK_INT >= 33) {
             return c.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") == PackageManager.PERMISSION_GRANTED
                     && c.checkSelfPermission("android.permission.READ_MEDIA_VIDEO") == PackageManager.PERMISSION_GRANTED;
@@ -142,12 +148,19 @@ final class Media {
         return MediaStore.Files.getContentUri("external");
     }
 
-    /** since_ms 뒤 저장된 사진·영상. pkg 가 있으면 그 앱이 저장한 것만(OWNER_PACKAGE_NAME, 안드로이드 10+). */
+    /** 내려받기 관리자로 받은 파일의 소유 앱. 봇 앱이 내려받기 관리자에 맡긴 결과도 그 앱의 것으로 본다. */
+    private static final String DOWNLOADS_PROVIDER = "com.android.providers.downloads";
+
+    /**
+     * since_ms 뒤 저장된 파일: 사진·영상·소리, 그리고 내려받기(Download)·문서(Documents) 폴더의 파일.
+     * pkg 가 있으면 그 앱이 저장한 것만(OWNER_PACKAGE_NAME, 안드로이드 10+). 내려받기 관리자가 소유한 파일은 함께 본다.
+     */
     static JSONObject since(Context c, long sinceMs, String pkg, JSONArray mimes) throws Exception {
         JSONObject o = new JSONObject();
         JSONArray items = new JSONArray();
         o.put("items", items);
         o.put("access", canRead(c));
+        o.put("all_files", allFiles());
         if (!canRead(c)) return o;
         ArrayList<String> want = new ArrayList<>();
         if (mimes != null) for (int i = 0; i < mimes.length(); i++) want.add(mimes.getString(i));
@@ -157,16 +170,20 @@ final class Media {
                         MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.OWNER_PACKAGE_NAME}
                 : new String[]{MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE,
                         MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_ADDED};
-        String sel = MediaStore.MediaColumns.DATE_ADDED + " >= ? AND (" + MediaStore.Files.FileColumns.MEDIA_TYPE + " = "
-                + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + " OR " + MediaStore.Files.FileColumns.MEDIA_TYPE + " = "
-                + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO + ")";
+        String mt = MediaStore.Files.FileColumns.MEDIA_TYPE;
+        String sel = MediaStore.MediaColumns.DATE_ADDED + " >= ? AND " + MediaStore.MediaColumns.MIME_TYPE + " IS NOT NULL AND ("
+                + mt + " IN (" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + "," + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                + "," + MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO + ")"
+                + (owner ? " OR " + MediaStore.MediaColumns.RELATIVE_PATH + " LIKE 'Download/%' OR "
+                        + MediaStore.MediaColumns.RELATIVE_PATH + " LIKE 'Documents/%'" : "")
+                + ")";
         String[] args = {String.valueOf(Math.max(0, sinceMs / 1000))};
         try (Cursor cur = c.getContentResolver().query(collection(), cols, sel, args, MediaStore.MediaColumns.DATE_ADDED + " DESC")) {
             if (cur == null) return o;
             while (cur.moveToNext() && items.length() < 20) {
                 String mime = cur.getString(2) == null ? "" : cur.getString(2);
                 String who = owner ? cur.getString(5) : null;
-                if (pkg != null && !pkg.isEmpty() && owner && !pkg.equals(who)) continue;
+                if (pkg != null && !pkg.isEmpty() && owner && !pkg.equals(who) && !DOWNLOADS_PROVIDER.equals(who)) continue;
                 if (!want.isEmpty() && want.stream().noneMatch(mime::startsWith)) continue;
                 JSONObject it = new JSONObject();
                 it.put("id", cur.getLong(0));
@@ -197,6 +214,7 @@ final class Media {
         // 사진·영상은 종류별 모음 주소로 여는 편이 권한 문제가 적다
         if (mime.startsWith("image/")) uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
         else if (mime.startsWith("video/")) uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+        else if (mime.startsWith("audio/")) uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id);
 
         HttpURLConnection http = open(c, null);
         http.setRequestMethod("POST");
